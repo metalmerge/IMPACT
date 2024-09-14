@@ -74,7 +74,7 @@ docs/_build/
 # PyBuilder
 .pybuilder/
 target/
-
+cropped_images_of_faces/
 # Jupyter Notebook
 .ipynb_checkpoints
 
