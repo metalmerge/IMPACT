@@ -78,9 +78,14 @@ def detect_and_crop_faces(image_path, output_dir):
         output_dir (str): Directory to save the cropped face images.
     """
     # Load the Haar Cascade classifier for face detection
-    face_cascade = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    # Load Haar Cascade classifier from the resource directory
+    haarcascades_path = resource_path(
+        "resources/haarcascades/haarcascade_frontalface_default.xml"
     )
+    face_cascade = cv2.CascadeClassifier(haarcascades_path)
+
+    if face_cascade.empty():
+        raise FileNotFoundError("Haar Cascade XML file not found or failed to load.")
 
     # Load the image
     image = cv2.imread(image_path)
@@ -352,6 +357,21 @@ def process_images(file_paths):
         process_image(file_path)
 
 
+import os
+from pathlib import Path
+import sys
+
+
+def resource_path(relative_path):
+    """Get the absolute path to a resource, works for both development and PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores the path in `sys._MEIPASS`
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+
 def process_image(input_image_path):
     # Get the user's Downloads folder
     downloads_folder = Path.home() / "Downloads"
@@ -365,8 +385,13 @@ def process_image(input_image_path):
 
     # Perform cropping and face detection
     # crop_center_vertical(input_image_path, output_image_folder)
+
+    # Use the resource_path function to get the path for the template image
+    certificate_template_path = resource_path("certificate_template.jpg")
+
+    # Pass the correct path to detect_and_crop_face_above_certificate
     detect_and_crop_face_above_certificate(
-        input_image_path, output_image_folder, "certificate_template.jpg"
+        input_image_path, output_image_folder, certificate_template_path
     )
 
 
@@ -493,7 +518,7 @@ def detect_and_crop_face_above_certificate(
         print(f"Max value: {max_val} {image_path}")
 
         # Set a threshold to detect the template
-        threshold = 0.8
+        threshold = 0.7
         if max_val >= threshold:
             template_w, template_h = certificate_template.shape[::-1]
             top_left = max_loc
@@ -513,9 +538,17 @@ def detect_and_crop_face_above_certificate(
             # return  # TODO, crop center vertical and try
 
         # Detect faces in the entire image
-        face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        # Load Haar Cascade classifier from the resource directory
+        haarcascades_path = resource_path(
+            "resources/haarcascades/haarcascade_frontalface_default.xml"
         )
+        face_cascade = cv2.CascadeClassifier(haarcascades_path)
+
+        if face_cascade.empty():
+            raise FileNotFoundError(
+                "Haar Cascade XML file not found or failed to load."
+            )
+
         faces = face_cascade.detectMultiScale(
             image, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)
         )
@@ -569,20 +602,21 @@ def main():
     # valid_data = read_and_validate_csv(csv_file_path)
     # # if valid_data is not None:
     # #     print(valid_data)
-    # groups = classify_members(valid_data)  # TODO check if works
+    # groups = classify_members(valid_data)
     # for group_name, members in groups.items():
     #     print(f"\n{group_name.replace('_', ' ').title()}:")
     #     for i, member in enumerate(members):
     #         if i >= 5:
     #             break
-    #         print(f"Name: {member[0]} {member[1]}, {member[3]} ({member[4]})")
+    #         print(f"Name: {member[0]} {member[1]}, {member[3]} ({member[4]})") #TODO figure out why last name appears more than twice
 
     # Image crop and find face
     images_dir = "images/"
+    # images_dir = "presidents_club_images/"
     select_images(images_dir)
 
     # Extract metadata from images in a folder
-    # folder_path = "path_to_your_image_folder"  # Path to the folder with images
+    # folder_path = "presidents_club_images/"  # Path to the folder with images
     # metadata_list = process_images_from_folder(folder_path)
     # # Print or save the metadata list
     # for image_name, caption_abstract in metadata_list:
