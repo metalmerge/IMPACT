@@ -10,18 +10,20 @@ import tempfile
 from pathlib import Path
 from tkinter import messagebox
 from PIL.ExifTags import TAGS
+import win32com.client
+import re
 
 
 def read_and_validate_csv(csv_file_path):
     """
-    This function reads a CSV file and extracts the 'First Name', 'Last Name', and 'LookupID' columns.
-    It also validates the data to ensure there are no missing values in these columns.
+    This function reads a CSV file and extracts the 'First Name', 'Last Name', 'LookupID', and 'Title' columns.
+    It also validates the data to ensure there are no missing values in these columns and removes duplicate entries.
 
     Parameters:
         csv_file_path (str): The file path to the CSV file.
 
     Returns:
-        pd.DataFrame: A DataFrame containing valid entries with First Name, Last Name, and LookupID.
+        pd.DataFrame: A DataFrame containing valid entries with First Name, Last Name, LookupID, and Title.
     """
     try:
         # Read the CSV file while skipping lines with errors
@@ -41,6 +43,7 @@ def read_and_validate_csv(csv_file_path):
         # Convert columns to string type
         relevant_data = relevant_data.astype(str)
 
+        # Remove rows with missing values in required columns
         valid_data = relevant_data.dropna(subset=required_columns)
         valid_data = valid_data[
             (valid_data["First Name"].str.strip() != "")
@@ -48,6 +51,9 @@ def read_and_validate_csv(csv_file_path):
             & (valid_data["LookupID"].str.strip() != "")
             & (valid_data["Title"].str.strip() != "")
         ]
+
+        # Remove duplicate rows based on 'First Name' and 'Last Name'
+        valid_data = valid_data.drop_duplicates(subset=["First Name", "Last Name"])
 
         if valid_data.empty:
             raise ValueError("No valid data found after filtering.")
@@ -118,59 +124,235 @@ def detect_and_crop_faces(image_path, output_dir):
         print(f"Cropped face image saved to {output_path} with 300 DPI.")
 
 
-def extract_metadata_from_image(image_path):
+def extract_title_from_windows_properties(image_path):
     """
-    Extracts metadata from an image, specifically the caption_abstract if available.
-
-    Parameters:
-        image_path (str): Path to the image file.
-
-    Returns:
-        tuple: (image_name, caption_abstract) where image_name is the name of the image file
-               and caption_abstract is the metadata value.
+    Extracts and prints the 'Title' from Windows file properties (Details > Description).
     """
     try:
-        # Open the image file
-        with Image.open(image_path) as img:
-            # Extract EXIF data
-            exif_data = img._getexif()
+        # Ensure the file exists
+        if not os.path.exists(image_path):
+            print(f"File does not exist: {image_path}")
+            return
 
-            if exif_data is not None:
-                # Find the tag for 'caption_abstract' if it exists
-                for tag_id, value in exif_data.items():
-                    tag = TAGS.get(tag_id, tag_id)
-                    if tag.lower() == "caption_abstract":
-                        return (os.path.basename(image_path), value)
+        # Get the absolute path to the folder
+        folder_path = os.path.abspath(os.path.dirname(image_path))
+        shell = win32com.client.Dispatch("Shell.Application")
+        folder = shell.Namespace(folder_path)
+
+        # Ensure that the folder object is valid
+        if folder is None:
+            print(f"Could not open folder: {folder_path}")
+            return
+
+        file = folder.ParseName(os.path.basename(image_path))
+
+        # Ensure the file object is valid
+        if file is None:
+            print(f"Could not open file: {image_path}")
+            return
+
+        # Extract the "Title" (in Windows, Title is property 21)
+        title = folder.GetDetailsOf(file, 21)
+
+        if title:
+            # print(f"Title for {os.path.basename(image_path)}: {title}")
+            return title
+        else:
+            print(f"No Title metadata found for {os.path.basename(image_path)}.")
+
     except Exception as e:
-        print(f"Error processing {image_path}: {e}")
-
-    # Return None if 'caption_abstract' is not found
-    return (os.path.basename(image_path), None)
+        print(f"Could not extract metadata for {image_path}: {e}")
 
 
-def process_images_from_folder(folder_path):
+def clean_title(title):
     """
-    Processes all images in a folder, extracting the caption_abstract metadata.
+    Removes unwanted words and phrases that are not names from the title.
 
     Parameters:
-        folder_path (str): Path to the folder containing image files.
+    title (str): The title text containing names and other information.
 
     Returns:
-        list of tuples: Each tuple contains (image_name, caption_abstract).
+    str: Cleaned title text with only potential names left.
     """
-    metadata_list = []
+    # Common words/phrases to remove
+    remove_phrases = [
+        "PC Certificate presented at",
+        "San Antonio",
+        "TX",
+        "May",
+        "February",
+        "Parents Weekend",
+        # "Larry Arnn",
+        "Argyle",
+        "Broadlawn",
+        "Reception",
+        "during",
+        # "at",
+        # "on",
+        "Presentation",
+        # "of",
+        "Not pictured",
+        "Certifice Presenti",
+        "Hillsdale College",
+        "Arnn September",
+        "Club Freshman",
+        "Parent Farewell",
+        "Presidents Club",
+        "Freshman Farewell",
+        "Dinner August",
+        "Hilt St",
+        "Club Certificate",
+        "Diamond Member",
+        "Photographer",
+        "Certificate",
+        "Lunche Vero",
+        "Metz Photographer",
+        "Steering Committee",
+        "Florida January",
+        "Irving Cventi",
+        "Kirryher Photographer",
+        "Simi Valley",
+        "Founders Circle",
+        "Searle Center",
+        "Socialism November",
+        "Fort Des",
+        "Palm Beach",
+        "Moines Iowa",
+        "Irving Convention",
+        "Hartford Connecticut",
+        r"\b\d{4}\b",  # Remove years
+        r"\b\d{1,2}[a-z]{2},?\s+\d{4}\b",  # Remove dates like "May 22, 2019"
+    ]
+    if "Hillsdale College hosts the National Leadership Seminar" in title:
+        return ""
 
-    # Iterate through all files in the directory
+    # Remove each unwanted phrase
+    for phrase in remove_phrases:
+        title = re.sub(phrase, "", title, flags=re.IGNORECASE)
+
+    # Remove extra whitespace
+    return " ".join(title.split())
+
+
+def clean_title_around_larry_arnn(title):
+    """
+    Cleans the title by extracting up to 4 words before and 4 words after 'Larry Arnn',
+    while excluding 'Larry Arnn' itself.
+
+    Parameters:
+    title (str): The title text containing names and other information.
+
+    Returns:
+    str: The cleaned title with up to 4 words before and 4 words after 'Larry Arnn'.
+    """
+    # Split the title into words
+    words = title.replace(",", "").replace(";", "").split()
+
+    # Find the index of "Larry Arnn" in the title
+    try:
+        larry_index = words.index(
+            "Larry"
+        )  # Find 'Larry' and assume 'Arnn' follows immediately
+    except ValueError:
+        # If "Larry" is not found, return the whole title
+        return ""
+
+    # Ensure "Arnn" is the next word to confirm we have "Larry Arnn"
+    if larry_index + 1 < len(words) and words[larry_index + 1] == "Arnn":
+        # Extract up to 4 words before "Larry Arnn"
+        start_index = max(0, larry_index - 4)
+
+        # Extract up to 4 words after "Arnn"
+        end_index = min(
+            len(words), larry_index + 2 + 4
+        )  # +2 to skip both "Larry" and "Arnn"
+
+        # Get the words before and after "Larry Arnn"
+        cleaned_words = (
+            words[start_index:larry_index] + words[larry_index + 2 : end_index]
+        )
+        cleaned_title = " ".join(cleaned_words)
+        # print(cleaned_title)
+    else:
+        # If "Arnn" is not immediately after "Larry," return the original title
+        cleaned_title = ""
+
+    return cleaned_title
+
+
+def split_and_return_names(names):
+    """
+    Splits names containing '&' into separate names and returns a list of individual names.
+
+    Parameters:
+    names (list): A list of names that may contain '&'.
+
+    Returns:
+    list: A list of individual names.
+    """
+    individual_names = []
+    for name in names:
+        if "&" in name:
+            # Split names by '&', strip extra spaces, and add each part separately
+            parts = [part.strip() for part in name.split("&")]
+            for part in parts:
+                if re.match(r"^[A-Z][a-z]+ [A-Z][a-z]+$", part):
+                    individual_names.append(part)
+        else:
+            individual_names.append(name)
+
+    return individual_names
+
+
+def extract_names_from_title(title):
+    """
+    Extracts one or two names from the title while excluding 'Larry Arnn'.
+
+    Parameters:
+    title (str): The title text containing names and other information.
+
+    Returns:
+    list: A list of extracted names (if any).
+    """
+    title = clean_title_around_larry_arnn(title)
+    # Clean the title by removing irrelevant phrases
+    cleaned_title = clean_title(title)
+
+    # Define a regex pattern to match names like "First & Last" or "First and Last"
+    name_pattern = r"([A-Z][a-z]+(?:\s*[&and]\s*[A-Z][a-z]+)*\s+[A-Z][a-z]+)"
+
+    # Extract names using the pattern
+    names = re.findall(name_pattern, cleaned_title)
+
+    individual_names = split_and_return_names(names)
+
+    # Return the extracted names, ensuring there's a maximum of two names
+    return individual_names[:2]
+
+
+def process_images_in_folder(folder_path):
+    """
+    Goes through all images in a folder and extracts the 'Title' metadata from Windows properties.
+    """
+    # Ensure the folder exists
+    if not os.path.exists(folder_path):
+        print(f"Folder '{folder_path}' does not exist.")
+        return
+    names_in_image = []
+    # Iterate through each file in the folder
     for file_name in os.listdir(folder_path):
+        # Construct the full path to the image file
         file_path = os.path.join(folder_path, file_name)
 
-        # Check if the file is an image (you can add more image formats as needed)
-        if file_name.lower().endswith((".png", ".jpg", ".jpeg")):
-            image_metadata = extract_metadata_from_image(file_path)
-            if image_metadata:
-                metadata_list.append(image_metadata)
-
-    return metadata_list
+        # Only process if it is a valid image file
+        if file_name.lower().endswith((".jpg", ".jpeg", ".png", ".tiff")):
+            title = extract_title_from_windows_properties(file_path)
+            names = extract_names_from_title(title)  # TODO
+            # print(names)
+            names_in_image.append((file_name, names))
+        else:
+            print(f"Skipping non-image file: {file_name}")
+    return names_in_image
 
 
 def load_data(csv_path):
@@ -212,7 +394,9 @@ def classify_members(data):
         title = row["Title"]
 
         # Count last names for marital status determination
-        last_name_count[last_name] += 1
+        last_name_count[
+            last_name
+        ] += 1  # TODO threre are people who are not married but still share last name
 
         # Determine gender
         gender = determine_gender(title)
@@ -608,19 +792,22 @@ def main():
     #     for i, member in enumerate(members):
     #         if i >= 5:
     #             break
-    #         print(f"Name: {member[0]} {member[1]}, {member[3]} ({member[4]})") #TODO figure out why last name appears more than twice
+    #         print(
+    #             f"Name: {member[0]} {member[1]}, {member[3]} ({member[4]})"
+    #         )  # TODO figure out why last name appears more than twice
 
     # Image crop and find face
-    images_dir = "images/"
+    # images_dir = "images/"
     # images_dir = "presidents_club_images/"
-    select_images(images_dir)
+    # select_images(images_dir)
 
     # Extract metadata from images in a folder
-    # folder_path = "presidents_club_images/"  # Path to the folder with images
-    # metadata_list = process_images_from_folder(folder_path)
-    # # Print or save the metadata list
-    # for image_name, caption_abstract in metadata_list:
-    #     print(f"Image: {image_name}, Caption Abstract: {caption_abstract}")
+    folder_path = "presidents_club_images/"  # Path to the folder with images
+    metadata_list = process_images_in_folder(folder_path)
+    # Print or save the metadata list
+    for image_name, names in metadata_list:
+        if names:
+            print(f"Names in: {image_name}:{names}")
 
 
 if __name__ == "__main__":
