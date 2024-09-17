@@ -12,6 +12,8 @@ from tkinter import messagebox
 from PIL.ExifTags import TAGS
 import win32com.client
 import re
+from pathlib import Path
+import sys
 
 
 def read_and_validate_csv(csv_file_path):
@@ -518,7 +520,7 @@ def classify_members(data):
     return groups
 
 
-def select_images(images_dir):
+def select_images(images_dir, names):
     # Directory containing the images
 
     # List all image files in the directory
@@ -529,21 +531,16 @@ def select_images(images_dir):
     ]
 
     if file_paths:
-        process_images(file_paths)
+        process_images(file_paths, names)
     else:
         messagebox.showinfo(
             "No Images Found", "No images found in the 'images/' directory."
         )
 
 
-def process_images(file_paths):
+def process_images(file_paths, names):
     for file_path in file_paths:
-        process_image(file_path)
-
-
-import os
-from pathlib import Path
-import sys
+        process_image(file_path, names)
 
 
 def resource_path(relative_path):
@@ -556,7 +553,7 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 
-def process_image(input_image_path):
+def process_image(input_image_path, names):
     # Get the user's Downloads folder
     downloads_folder = Path.home() / "Downloads"
 
@@ -575,7 +572,7 @@ def process_image(input_image_path):
 
     # Pass the correct path to detect_and_crop_face_above_certificate
     detect_and_crop_face_above_certificate(
-        input_image_path, output_image_folder, certificate_template_path
+        input_image_path, output_image_folder, certificate_template_path, names
     )
 
 
@@ -590,7 +587,7 @@ def crop_center_vertical(image_path, output_dir):
     try:
         # Load the image using OpenCV
         image = cv2.imread(image_path)
-        height, width = image.shape[:2]
+        _, width = image.shape[:2]
 
         # Calculate the width of each section
         section_width = width // 3
@@ -676,7 +673,7 @@ def crop_image_above_certificate(image, certificate_area):
 
 
 def detect_and_crop_face_above_certificate(
-    image_path, output_dir, certificate_template_path
+    image_path, output_dir, certificate_template_path, names
 ):
     """
     Detects the certificate in the image, finds the face above it, crops the face, and saves it with 300 DPI.
@@ -766,10 +763,11 @@ def detect_and_crop_face_above_certificate(
 
         # Ensure the output directory exists
         os.makedirs(output_dir, exist_ok=True)
-
+        names_string = "_".join([f"{name[0]}_{name[1]}" for name in names])
         # Define the output path for the largest face image
         output_path = os.path.join(
-            output_dir, f"{os.path.basename(image_path)}_face.png"
+            output_dir,
+            f"{os.path.basename(image_path)}_{names_string}.png",
         )
 
         # Save the cropped image with 300 DPI
@@ -781,33 +779,37 @@ def detect_and_crop_face_above_certificate(
 
 
 def main():
-    # extract info from csv
-    # csv_file_path = r"CCA PC members for photos.csv"
-    # valid_data = read_and_validate_csv(csv_file_path)
-    # # if valid_data is not None:
-    # #     print(valid_data)
-    # groups = classify_members(valid_data)
-    # for group_name, members in groups.items():
-    #     print(f"\n{group_name.replace('_', ' ').title()}:")
-    #     for i, member in enumerate(members):
-    #         if i >= 5:
-    #             break
-    #         print(
-    #             f"Name: {member[0]} {member[1]}, {member[3]} ({member[4]})"
-    #         )  # TODO figure out why last name appears more than twice
 
-    # Image crop and find face
-    # images_dir = "images/"
-    # images_dir = "presidents_club_images/"
-    # select_images(images_dir)
+    if sys.argv[1] == "1":
+        # extract info from csv
+        csv_file_path = r"CCA PC members for photos.csv"
+        valid_data = read_and_validate_csv(csv_file_path)
+        # if valid_data is not None:
+        #     print(valid_data)
+        groups = classify_members(valid_data)
+        for group_name, members in groups.items():
+            print(f"\n{group_name.replace('_', ' ').title()}:")
+            for i, member in enumerate(members):
+                if i >= 5:
+                    break
+                print(
+                    f"Name: {member[0]} {member[1]}, {member[3]} ({member[4]})"
+                )  # TODO last name appears more than twice due to last names like smith
 
-    # Extract metadata from images in a folder
-    folder_path = "presidents_club_images/"  # Path to the folder with images
-    metadata_list = process_images_in_folder(folder_path)
-    # Print or save the metadata list
-    for image_name, names in metadata_list:
-        if names:
-            print(f"Names in: {image_name}:{names}")
+    # TODO: based on how many last names, find the corressponding image and crop the face, make a flow chart
+    elif sys.argv[1] == "2":
+        # Extract metadata from images in a folder
+        folder_path = "presidents_club_images/"  # Path to the folder with images
+        metadata_list = process_images_in_folder(folder_path)
+        # Print or save the metadata list
+        for image_name, names in metadata_list:
+            if names:
+                print(f"Names in: {image_name}:{names}")
+                process_image(folder_path + image_name, names)
+    elif sys.argv[1] == "3":
+        # Image crop and find face examples
+        images_dir = "images/"
+        select_images(images_dir, [("John", "Doe"), ("Jane", "Doe")])
 
 
 if __name__ == "__main__":
