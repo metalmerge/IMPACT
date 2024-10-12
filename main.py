@@ -16,6 +16,22 @@ from pathlib import Path
 import sys
 import csv
 from tqdm import tqdm
+import shutil
+
+EXTENSIONS = [
+    ".JPG",
+    ".jpg",
+    ".jpeg",
+    ".JPEG",
+    ".png",
+    ".PNG",
+    ".bmp",
+    ".BMP",
+    ".tiff",
+    ".TIFF",
+    ".webp",
+    ".WEBP",
+]
 
 
 def read_and_validate_csv(csv_file_path):
@@ -87,7 +103,6 @@ def detect_and_crop_faces(image_path, output_dir):
         image_path (str): Path to the input image.
         output_dir (str): Directory to save the cropped face images.
     """
-    # Load the Haar Cascade classifier for face detection
     # Load Haar Cascade classifier from the resource directory
     haarcascades_path = resource_path(
         "resources/haarcascades/haarcascade_frontalface_default.xml"
@@ -122,7 +137,7 @@ def detect_and_crop_faces(image_path, output_dir):
         pil_image = Image.fromarray(cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB))
 
         # Save the cropped image with 300 DPI
-        output_path = os.path.join(output_dir, f"face_{i+1}.png")
+        output_path = os.path.join(output_dir, f"face_{i + 1}.png")
         pil_image.save(output_path, dpi=(300, 300))
 
         print(f"Cropped face image saved to {output_path} with 300 DPI.")
@@ -131,12 +146,18 @@ def detect_and_crop_faces(image_path, output_dir):
 def extract_title_from_windows_properties(image_path):
     """
     Extracts and prints the 'Title' from Windows file properties (Details > Description).
+
+    Parameters:
+        image_path (str): The path to the image file.
+
+    Returns:
+        str: The extracted title if found, otherwise None.
     """
     try:
         # Ensure the file exists
         if not os.path.exists(image_path):
             print(f"File does not exist: {image_path}")
-            return
+            return None
 
         # Get the absolute path to the folder
         folder_path = os.path.abspath(os.path.dirname(image_path))
@@ -146,26 +167,27 @@ def extract_title_from_windows_properties(image_path):
         # Ensure that the folder object is valid
         if folder is None:
             print(f"Could not open folder: {folder_path}")
-            return
+            return None
 
         file = folder.ParseName(os.path.basename(image_path))
 
         # Ensure the file object is valid
         if file is None:
             print(f"Could not open file: {image_path}")
-            return
+            return None
 
         # Extract the "Title" (in Windows, Title is property 21)
         title = folder.GetDetailsOf(file, 21)
 
         if title:
-            # print(f"Title for {os.path.basename(image_path)}: {title}")
             return title
         else:
             print(f"No Title metadata found for {os.path.basename(image_path)}.")
+            return None
 
     except Exception as e:
         print(f"Could not extract metadata for {image_path}: {e}")
+        return None
 
 
 def clean_title(title):
@@ -173,30 +195,26 @@ def clean_title(title):
     Removes unwanted words and phrases that are not names from the title.
 
     Parameters:
-    title (str): The title text containing names and other information.
+        title (str): The title text containing names and other information.
 
     Returns:
-    str: Cleaned title text with only potential names left.
+        str: Cleaned title text with only potential names left.
     """
     # Common words/phrases to remove
-    remove_phrases = [
+    remove_phrases = [  # TODO import a library for this
         "PC Certificate presented at",
         "San Antonio",
         "TX",
         "May",
         "February",
         "Parents Weekend",
-        # "Larry Arnn",
         "Argyle",
         "Hillsdale College",
         "Dinner",
         "Broadlawn",
         "Reception",
         "during",
-        # "at",
-        # "on",
         "Presentation",
-        # "of",
         "Not pictured",
         "Certifice Presenti",
         "Hillsdale College",
@@ -235,11 +253,11 @@ def clean_title(title):
         "Center Irving",
         "Center",
         "March",
-
         "Hartford Connecticut",
         r"\b\d{4}\b",  # Remove years
         r"\b\d{1,2}[a-z]{2},?\s+\d{4}\b",  # Remove dates like "May 22, 2019"
     ]
+
     if "Hillsdale College hosts the National Leadership Seminar" in title:
         return ""
 
@@ -257,14 +275,15 @@ def clean_title_around_larry_arnn(title):
     while excluding 'Larry Arnn' itself.
 
     Parameters:
-    title (str): The title text containing names and other information.
+        title (str): The title text containing names and other information.
 
     Returns:
-    str: The cleaned title with up to 4 words before and 4 words after 'Larry Arnn'.
+        str: The cleaned title with up to 4 words before and 4 words after 'Larry Arnn'.
     """
-    # Split the title into words
     if title is None:
         return None
+
+    # Split the title into words
     words = title.replace(",", "").replace(";", "").split()
 
     # Find the index of "Larry Arnn" in the title
@@ -273,7 +292,7 @@ def clean_title_around_larry_arnn(title):
             "Larry"
         )  # Find 'Larry' and assume 'Arnn' follows immediately
     except ValueError:
-        # If "Larry" is not found, return the whole title
+        # If "Larry" is not found, return an empty string
         return ""
 
     # Ensure "Arnn" is the next word to confirm we have "Larry Arnn"
@@ -291,9 +310,8 @@ def clean_title_around_larry_arnn(title):
             words[start_index:larry_index] + words[larry_index + 2 : end_index]
         )
         cleaned_title = " ".join(cleaned_words)
-        # print(cleaned_title)
     else:
-        # If "Arnn" is not immediately after "Larry," return the original title
+        # If "Arnn" is not immediately after "Larry," return an empty string
         cleaned_title = ""
 
     return cleaned_title
@@ -304,10 +322,10 @@ def split_and_return_names(names):
     Splits names containing '&' into separate names and returns a list of individual names.
 
     Parameters:
-    names (list): A list of names that may contain '&'.
+        names (list): A list of names that may contain '&'.
 
     Returns:
-    list: A list of individual names.
+        list: A list of individual names.
     """
     individual_names = []
     for name in names:
@@ -328,14 +346,14 @@ def extract_names_from_title(title):
     Extracts one or two names from the title while excluding 'Larry Arnn'.
 
     Parameters:
-    title (str): The title text containing names and other information.
+        title (str): The title text containing names and other information.
 
     Returns:
-    list: A list of extracted names (if any).
+        list: A list of extracted names (if any).
     """
     title = clean_title_around_larry_arnn(title)
     # Clean the title by removing irrelevant phrases
-    cleaned_title = clean_title(title) # TODO: fix McGregor
+    cleaned_title = clean_title(title)
 
     # Define a regex pattern to match names like "First & Last" or "First and Last"
     name_pattern = r"([A-Z][a-z]+(?:\s*[&and]\s*[A-Z][a-z]+)*\s+[A-Z][a-z]+)"
@@ -348,7 +366,17 @@ def extract_names_from_title(title):
     # Return the extracted names, ensuring there's a maximum of two names
     return individual_names[:2]
 
+
 def extract_names_from_filename(file_name):
+    """
+    Extracts names from the file name.
+
+    Parameters:
+        file_name (str): The file name containing names.
+
+    Returns:
+        list: A list of extracted names.
+    """
     # Remove the file extension
     base_name = os.path.splitext(file_name)[0]
 
@@ -368,34 +396,38 @@ def extract_names_from_filename(file_name):
 
     return full_names
 
+
 def process_images_in_folder(folder_path):
     """
     Goes through all images in a folder and extracts the 'Title' metadata from Windows properties.
+
+    Returns:
+        list: A list of tuples containing the file name and extracted names.
     """
+    global EXTENSIONS
     # Ensure the folder exists
     if not os.path.exists(folder_path):
         print(f"Folder '{folder_path}' does not exist.")
-        return
+        return []
+
     names_in_image = []
+
     # Iterate through each file in the folder
     for file_name in os.listdir(folder_path):
-        # Construct the full path to the image file
-        # file_path = os.path.join(folder_path, file_name)
-
         # Only process if it is a valid image file
         if any(char in file_name for char in "0123456789"):
             continue
-        elif file_name.lower().endswith((".jpg", ".jpeg", ".png", ".tiff")):
-
+        elif file_name.lower().endswith(tuple(EXTENSIONS)):
             # title = extract_title_from_windows_properties(file_path)
             # names = extract_names_from_title(title)  # TODO
 
             # title = file_name
+            # Extract names from the file name
             names = extract_names_from_filename(file_name)
-            # print(names)
             names_in_image.append((file_name, names))
         else:
             print(f"Skipping non-image file: {file_name}")
+
     return names_in_image
 
 
@@ -414,6 +446,15 @@ def determine_gender(title):
 
 
 def classify_members(data):
+    """
+    Classifies members into various groups based on their titles, last names, and gender.
+
+    Parameters:
+        data (pd.DataFrame): The DataFrame containing member information.
+
+    Returns:
+        dict: A dictionary with groups as keys and lists of members as values.
+    """
     # Data structures to store classified groups
     groups = {
         "man_multiple": [],
@@ -438,9 +479,7 @@ def classify_members(data):
         title = row["Title"]
 
         # Count last names for marital status determination
-        last_name_count[
-            last_name
-        ] += 1  # TODO threre are people who are not married but still share last name
+        last_name_count[last_name] += 1
 
         # Determine gender
         gender = determine_gender(title)
@@ -563,13 +602,12 @@ def classify_members(data):
 
 
 def select_images(images_dir, names):
-    # Directory containing the images
-
+    global EXTENSIONS
     # List all image files in the directory
     file_paths = [
         os.path.join(images_dir, file_name)
         for file_name in os.listdir(images_dir)
-        if file_name.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".tiff"))
+        if file_name.lower().endswith(tuple(EXTENSIONS))
     ]
 
     if file_paths:
@@ -621,10 +659,6 @@ def process_image(input_image_path, names):
 def crop_center_vertical(image_path, output_dir):
     """
     Crops the image into three vertical sections and keeps only the center section.
-
-    Parameters:
-        image_path (str): Path to the input image.
-        output_dir (str): Directory to save the cropped center section.
     """
     try:
         # Load the image using OpenCV
@@ -641,24 +675,7 @@ def crop_center_vertical(image_path, output_dir):
         # Crop the center section
         center_section = image[:, start_x:end_x]
 
-        # Further crop the center section to keep only the top half
-        # top_half_center_section = center_section[: height // 2, :]
-
-        # Convert to PIL format
-        # pil_image = Image.fromarray(cv2.cvtColor(center_section, cv2.COLOR_BGR2RGB))
         return center_section
-        # Save the cropped image to a temporary file
-        # with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_file:
-        #     temp_image_path = temp_file.name
-        #     pil_image.save(temp_image_path)
-
-        # # Perform face detection on the temporary file
-        # # detect_and_crop_face_above_certificate(
-        # #     temp_image_path, output_dir, "certificate_template.jpg"
-        # # )
-
-        # # Remove the temporary file
-        # os.remove(temp_image_path)
 
         print(f"Cropped center section saved to {output_dir}")
     except Exception as e:
@@ -701,12 +718,6 @@ def crop_image_above_certificate(image, certificate_area):
         # Crop the image
         cropped_image = image[crop_top:crop_bottom, left_x:right_x]
 
-        # Convert the numpy.ndarray to a PIL Image object
-        # pil_image = Image.fromarray(cropped_image)
-
-        # Save the PIL Image object
-        # pil_image.save("cropped_image.jpg")
-
         return cropped_image
 
     except Exception as e:
@@ -714,36 +725,38 @@ def crop_image_above_certificate(image, certificate_area):
         return None
 
 
-def detect_and_crop_face_above_certificate(image_path, output_dir, certificate_template_path, names):
+def detect_and_crop_face_above_certificate(
+    image_path, output_dir, certificate_template_path, names
+):
     """
     Detects the certificate in the image, finds the face above it, crops the face, and saves it with 300 DPI.
-
-    Parameters:
-        image_path (str): Path to the input image.
-        output_dir (str): Directory to save the cropped face image.
-        certificate_template_path (str): Path to the certificate template image.
-        names (list): List of names to be used in the output file name.
     """
     # Load the certificate template and input image
     certificate_template = cv2.imread(certificate_template_path, cv2.IMREAD_GRAYSCALE)
     image = cv2.imread(image_path)
     if image is None:
-        print(f"Error: Unable to load image at {image_path}")
-        # TODO save error to log file
-
+        error_message = f"Error: Unable to load image at {image_path}"
+        print(error_message)
+        # Save the error message to a log file (errors.txt)
+        with open("errors.txt", "a") as error_file:
+            error_file.write(f"{error_message}\n")
         return
+
     gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
     # Perform template matching to find the certificate in the image
     result = cv2.matchTemplate(gray_image, certificate_template, cv2.TM_CCOEFF_NORMED)
     _, max_val, _, max_loc = cv2.minMaxLoc(result)
-    # print(names)
-    if ".JPG" in names or ".jpg" in names or ".jpeg" in names or ".JPEG" in names or ".png" in names or ".PNG" in names or ".bmp" in names or ".BMP" in names or ".tiff" in names or ".TIFF" in names:
-        names_string = names.replace(".JPG", "").replace(".jpg", "").replace(".jpeg", "").replace(".JPEG", "").replace(".png", "").replace(".PNG", "").replace(".bmp", "").replace(".BMP", "").replace(".tiff", "").replace(".TIFF", "")
+
+    # Check if any extension is in names and replace them
+    if any(ext in names for ext in EXTENSIONS):
+        for ext in EXTENSIONS:
+            names = names.replace(ext, "")
+        names_string = names
     else:
         names_string = "_".join(str(name).replace(" ", "_") for name in names)
-    # print(names_string)
     output_path = os.path.join(output_dir, f"{names_string}.png")
+
     # Set a threshold to detect the template
     threshold = 0.7
     if max_val >= threshold:
@@ -766,7 +779,9 @@ def detect_and_crop_face_above_certificate(image_path, output_dir, certificate_t
     if face_cascade.empty():
         raise FileNotFoundError("Haar Cascade XML file not found or failed to load.")
 
-    faces = face_cascade.detectMultiScale(image, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+    faces = face_cascade.detectMultiScale(
+        image, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)
+    )
     if len(faces) == 0:
         print("No faces found in the image.")
         return
@@ -778,7 +793,7 @@ def detect_and_crop_face_above_certificate(image_path, output_dir, certificate_t
         return
 
     x, y, w, h = largest_face
-    cropped_image = image[y:y + h, x:x + w]
+    cropped_image = image[y : y + h, x : x + w]
 
     # Convert to PIL format and save the image
     pil_image = Image.fromarray(cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB))
@@ -791,7 +806,7 @@ def detect_and_crop_face_above_certificate(image_path, output_dir, certificate_t
 
 def match_and_save_images(csv_data, images_folder, output_folder):
     """
-    This function matches each data entry in the CSV file with an image from the folder of images using their first and last name,
+    Matches each data entry in the CSV file with an image from the folder of images using their first and last name,
     and then saves the image in the format "first_name_last_name_lookup_id".
 
     Parameters:
@@ -802,13 +817,14 @@ def match_and_save_images(csv_data, images_folder, output_folder):
     # Ensure the output directory exists
     os.makedirs(output_folder, exist_ok=True)
     matches = 0
+
     for index, row in csv_data.iterrows():
         first_name = row["First Name"].strip()
         last_name = row["Last Name"].strip()
         lookup_id = row["LookupID"].strip()
 
         # Construct the image file name
-        image_file_name = f"{first_name}_{last_name}"  # .lower()
+        image_file_name = f"{first_name}_{last_name}"
         image_file_path = None
 
         # Search for the image file in the images folder
@@ -825,7 +841,7 @@ def match_and_save_images(csv_data, images_folder, output_folder):
             image = Image.open(image_file_path)
 
             # Construct the output file name
-            output_file_name = f"{out_name.replace(".png","")}_{lookup_id}.png"
+            output_file_name = f"{out_name.replace('.png', '')}_{lookup_id}.png"
             output_file_path = Path(output_folder) / output_file_name
 
             # Save the image in the desired format
@@ -835,62 +851,95 @@ def match_and_save_images(csv_data, images_folder, output_folder):
             matches += 1
         else:
             print(f"No matching image found for {first_name} {last_name}")
+
     print(f"Total matches: {matches}")
 
 
+def extract_names(filename):
+    names = set()  # Use a set to avoid duplicates
+
+    with open(filename, mode="r", newline="", encoding="ISO-8859-1") as file:
+        reader = csv.reader(file)
+        for row in reader:
+            combined_row = " ".join(row)
+            found_names = re.findall(
+                r"([A-Z][a-z]+(?:\s[A-Z]\.)?(?:\s[A-Z][a-z]+)?)\s-\s(\d+)", combined_row
+            )
+            for name, _ in found_names:
+                name_parts = name.split()
+                if len(name_parts) >= 2:
+                    first_name = name_parts[0]
+                    last_name = name_parts[-1]
+                    names.add(f"{first_name} {last_name}")  # Add to set
+
+    return names
+
 
 def main():
+    # TODO: based on how many last names, find the corressponding image and crop the face, make a flow chart
+    """
+    Main function to process PC Members photos.
+    Depending on the command line arguments, it either extracts and filters member data, processes images,
+    or matches images to corresponding members.
+    """
+    # Define the CSV file containing member information
+    filename = "PC Members Photos 20240916.csv"
 
-    filename = 'PC Members Photos 20240916.csv'
-    # Call the function and print the results
+    # Extract names from the CSV and store them
     extracted_names = extract_names(filename)
-    for name in extracted_names:
-        print(name)
-    # if sys.argv[1] == "1":
-    # extract info from csv
+
+    # Read and validate CSV file containing PC member details
     csv_file_path = r"CCA PC members for photos.csv"
     valid_data = read_and_validate_csv(csv_file_path)
-    # if valid_data is not None:
-    #     print(valid_data)
+
     if valid_data is not None:
-        # Filter out entries that match extracted names
+        # Filter out entries that match the extracted names
         filtered_data = valid_data[
-            ~valid_data.apply(lambda row: f"{row['First Name']} {row['Last Name']}" in extracted_names, axis=1)
+            ~valid_data.apply(
+                lambda row: f"{row['First Name']} {row['Last Name']}"
+                in extracted_names,
+                axis=1,
+            )
         ]
         print(f"Filtered out {len(valid_data) - len(filtered_data)} entries.")
-    groups = classify_members(filtered_data)
-    for group_name, members in groups.items():
-        print(f"Number of {group_name.replace('_', ' ').title()}: {len(members)}")
-        print(f"\n{group_name.replace('_', ' ').title()}:")
-        for i, member in enumerate(members):
-            if i >= 3:
-                break
-            print(
-                f"Name: {member[0]} {member[1]}, {member[3]} ({member[4]})"  # First name, Last name, Title, Count
-            )  # TODO last name appears more than twice due to last names like smith
 
-    # TODO: based on how many last names, find the corressponding image and crop the face, make a flow chart
+        # Classify members into groups based on certain criteria
+        groups = classify_members(filtered_data)
+
+        # Display group classification details
+        for group_name, members in groups.items():
+            print(f"Number of {group_name.replace('_', ' ').title()}: {len(members)}")
+            print(f"\n{group_name.replace('_', ' ').title()}:")
+
+            # Print the first three members in each group
+            for i, member in enumerate(
+                members[:3]
+            ):  # Only displaying the first three members
+                print(f"Name: {member[0]} {member[1]}, {member[3]} ({member[4]})")
+
+    # Path for storing the cropped face images
     output_folder = Path.home() / "Downloads" / "cropped_faces"
-    if sys.argv[1] == "2":
-        # Extract metadata from images in a folder
-        folder_path = "PC_Photos_v3/"  # Path to the folder with images
-        metadata_list = process_images_in_folder(folder_path)
-        # # Print or save the metadata list
-        
 
+    # Process based on command-line arguments
+    if sys.argv[1] == "2":
+        # Extract metadata from images in the folder
+        folder_path = "PC_Photos_v3/"  # Folder containing member images
+        metadata_list = process_images_in_folder(folder_path)
+
+        # Print or process each image metadata
         for image_name, names in tqdm(metadata_list, desc="Processing images"):
             if names:
                 print(f"Names in: {image_name}: {names}")
-                process_image(folder_path + image_name, names) # TODO check if the image is in the downloads folder already
+                process_image(Path(folder_path) / image_name, names)
 
-    elif sys.argv[1] == "3": # example
-        # Image crop and find face examples
+    elif sys.argv[1] == "3":
+        # Example: Image crop and find face examples
         images_dir = "images/"
         select_images(images_dir, [("John", "Doe"), ("Jane", "Doe")])
 
     elif sys.argv[1] == "4":
-        match_and_save_images(valid_data, output_folder, (f"{output_folder}_id"))
-
+        # Match and save images to members
+        match_and_save_images(valid_data, output_folder, str(output_folder) + "_id")
 
 
 if __name__ == "__main__":
