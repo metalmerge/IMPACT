@@ -14,6 +14,8 @@ import win32com.client
 import re
 from pathlib import Path
 import sys
+import csv
+from tqdm import tqdm
 
 
 def read_and_validate_csv(csv_file_path):
@@ -186,6 +188,8 @@ def clean_title(title):
         "Parents Weekend",
         # "Larry Arnn",
         "Argyle",
+        "Hillsdale College",
+        "Dinner",
         "Broadlawn",
         "Reception",
         "during",
@@ -212,15 +216,26 @@ def clean_title(title):
         "Steering Committee",
         "Florida January",
         "Irving Cventi",
+        "Member",
+        "Presented",
+        "Society",
         "Kirryher Photographer",
         "Simi Valley",
         "Founders Circle",
+        "China",
+        "Hotel",
+        "September",
+        "Grand Plaza Hotel",
         "Searle Center",
         "Socialism November",
         "Fort Des",
         "Palm Beach",
         "Moines Iowa",
         "Irving Convention",
+        "Center Irving",
+        "Center",
+        "March",
+
         "Hartford Connecticut",
         r"\b\d{4}\b",  # Remove years
         r"\b\d{1,2}[a-z]{2},?\s+\d{4}\b",  # Remove dates like "May 22, 2019"
@@ -248,6 +263,8 @@ def clean_title_around_larry_arnn(title):
     str: The cleaned title with up to 4 words before and 4 words after 'Larry Arnn'.
     """
     # Split the title into words
+    if title is None:
+        return None
     words = title.replace(",", "").replace(";", "").split()
 
     # Find the index of "Larry Arnn" in the title
@@ -318,7 +335,7 @@ def extract_names_from_title(title):
     """
     title = clean_title_around_larry_arnn(title)
     # Clean the title by removing irrelevant phrases
-    cleaned_title = clean_title(title)
+    cleaned_title = clean_title(title) # TODO: fix McGregor
 
     # Define a regex pattern to match names like "First & Last" or "First and Last"
     name_pattern = r"([A-Z][a-z]+(?:\s*[&and]\s*[A-Z][a-z]+)*\s+[A-Z][a-z]+)"
@@ -331,6 +348,25 @@ def extract_names_from_title(title):
     # Return the extracted names, ensuring there's a maximum of two names
     return individual_names[:2]
 
+def extract_names_from_filename(file_name):
+    # Remove the file extension
+    base_name = os.path.splitext(file_name)[0]
+
+    # Split the name(s) by "and" if present
+    names = base_name.split(" and ")
+
+    # Process each name, assuming the last name is the last word in the file name
+    full_names = []
+    if len(names) == 1:
+        # Single name
+        full_names.append(names[0].strip())
+    elif len(names) == 2:
+        # Two names, assume the last name is shared
+        last_name = names[1].split()[-1]  # Last name from the second name
+        full_names.append(f"{names[0].strip()} {last_name}")
+        full_names.append(f"{names[1].strip()}")
+
+    return full_names
 
 def process_images_in_folder(folder_path):
     """
@@ -344,12 +380,18 @@ def process_images_in_folder(folder_path):
     # Iterate through each file in the folder
     for file_name in os.listdir(folder_path):
         # Construct the full path to the image file
-        file_path = os.path.join(folder_path, file_name)
+        # file_path = os.path.join(folder_path, file_name)
 
         # Only process if it is a valid image file
-        if file_name.lower().endswith((".jpg", ".jpeg", ".png", ".tiff")):
-            title = extract_title_from_windows_properties(file_path)
-            names = extract_names_from_title(title)  # TODO
+        if any(char in file_name for char in "0123456789"):
+            continue
+        elif file_name.lower().endswith((".jpg", ".jpeg", ".png", ".tiff")):
+
+            # title = extract_title_from_windows_properties(file_path)
+            # names = extract_names_from_title(title)  # TODO
+
+            # title = file_name
+            names = extract_names_from_filename(file_name)
             # print(names)
             names_in_image.append((file_name, names))
         else:
@@ -672,9 +714,7 @@ def crop_image_above_certificate(image, certificate_area):
         return None
 
 
-def detect_and_crop_face_above_certificate(
-    image_path, output_dir, certificate_template_path, names
-):
+def detect_and_crop_face_above_certificate(image_path, output_dir, certificate_template_path, names):
     """
     Detects the certificate in the image, finds the face above it, crops the face, and saves it with 300 DPI.
 
@@ -682,134 +722,175 @@ def detect_and_crop_face_above_certificate(
         image_path (str): Path to the input image.
         output_dir (str): Directory to save the cropped face image.
         certificate_template_path (str): Path to the certificate template image.
+        names (list): List of names to be used in the output file name.
     """
-    try:
-        # Load the certificate template and input image
-        certificate_template = cv2.imread(
-            certificate_template_path, cv2.IMREAD_GRAYSCALE
-        )
-        image = cv2.imread(image_path)
-        gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    # Load the certificate template and input image
+    certificate_template = cv2.imread(certificate_template_path, cv2.IMREAD_GRAYSCALE)
+    image = cv2.imread(image_path)
+    if image is None:
+        print(f"Error: Unable to load image at {image_path}")
+        # TODO save error to log file
 
-        # Perform template matching to find the certificate in the image
-        result = cv2.matchTemplate(
-            gray_image, certificate_template, cv2.TM_CCOEFF_NORMED
-        )
-        _, max_val, _, max_loc = cv2.minMaxLoc(result)
-        print(f"Max value: {max_val} {image_path}")
+        return
+    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-        # Set a threshold to detect the template
-        threshold = 0.7
-        if max_val >= threshold:
-            template_w, template_h = certificate_template.shape[::-1]
-            top_left = max_loc
-            bottom_right = (top_left[0] + template_w, top_left[1] + template_h)
-            certificate_area = (top_left, bottom_right)
-            print(f"Certificate found at {certificate_area}")
-            # save image of certificate for testing .crop((x1, y1, x2, y2))
-            # certificate_image = image[
-            #     certificate_area[0][1] : certificate_area[1][1],
-            #     certificate_area[0][0] : certificate_area[1][0],
-            # ]
-            # cv2.imwrite("certificate_image.jpg", certificate_image)
-            image = crop_image_above_certificate(image, certificate_area)
+    # Perform template matching to find the certificate in the image
+    result = cv2.matchTemplate(gray_image, certificate_template, cv2.TM_CCOEFF_NORMED)
+    _, max_val, _, max_loc = cv2.minMaxLoc(result)
+    # print(names)
+    if ".JPG" in names or ".jpg" in names or ".jpeg" in names or ".JPEG" in names or ".png" in names or ".PNG" in names or ".bmp" in names or ".BMP" in names or ".tiff" in names or ".TIFF" in names:
+        names_string = names.replace(".JPG", "").replace(".jpg", "").replace(".jpeg", "").replace(".JPEG", "").replace(".png", "").replace(".PNG", "").replace(".bmp", "").replace(".BMP", "").replace(".tiff", "").replace(".TIFF", "")
+    else:
+        names_string = "_".join(str(name).replace(" ", "_") for name in names)
+    # print(names_string)
+    output_path = os.path.join(output_dir, f"{names_string}.png")
+    # Set a threshold to detect the template
+    threshold = 0.7
+    if max_val >= threshold:
+        template_w, template_h = certificate_template.shape[::-1]
+        top_left = max_loc
+        bottom_right = (top_left[0] + template_w, top_left[1] + template_h)
+        certificate_area = (top_left, bottom_right)
+        image = crop_image_above_certificate(image, certificate_area)
+    else:
+        if os.path.exists(output_path):
+            print(f"Image already exists in {output_dir}")
+            return
+        image = crop_center_vertical(image_path, output_dir)
+
+    # Load Haar Cascade classifier for face detection
+    haarcascades_path = resource_path(
+        "resources/haarcascades/haarcascade_frontalface_default.xml"
+    )
+    face_cascade = cv2.CascadeClassifier(haarcascades_path)
+    if face_cascade.empty():
+        raise FileNotFoundError("Haar Cascade XML file not found or failed to load.")
+
+    faces = face_cascade.detectMultiScale(image, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+    if len(faces) == 0:
+        print("No faces found in the image.")
+        return
+
+    # Find the largest face
+    largest_face = max(faces, key=lambda rect: rect[2] * rect[3], default=None)
+    if largest_face is None:
+        print("No valid face found above the certificate.")
+        return
+
+    x, y, w, h = largest_face
+    cropped_image = image[y:y + h, x:x + w]
+
+    # Convert to PIL format and save the image
+    pil_image = Image.fromarray(cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB))
+    os.makedirs(output_dir, exist_ok=True)
+    print(output_path)
+    pil_image.save(output_path, dpi=(300, 300))
+
+    print(f"Largest cropped face image saved to {output_path}\n")
+
+
+def match_and_save_images(csv_data, images_folder, output_folder):
+    """
+    This function matches each data entry in the CSV file with an image from the folder of images using their first and last name,
+    and then saves the image in the format "first_name_last_name_lookup_id".
+
+    Parameters:
+        csv_data (pd.DataFrame): The validated CSV data.
+        images_folder (str): The folder containing the images.
+        output_folder (str): The folder to save the matched images.
+    """
+    # Ensure the output directory exists
+    os.makedirs(output_folder, exist_ok=True)
+    matches = 0
+    for index, row in csv_data.iterrows():
+        first_name = row["First Name"].strip()
+        last_name = row["Last Name"].strip()
+        lookup_id = row["LookupID"].strip()
+
+        # Construct the image file name
+        image_file_name = f"{first_name}_{last_name}"  # .lower()
+        image_file_path = None
+
+        # Search for the image file in the images folder
+        for file in os.listdir(images_folder):
+            if image_file_name in file:
+                potential_path = Path(images_folder) / file
+                if potential_path.exists():
+                    image_file_path = potential_path
+                    out_name = file
+                    break
+
+        if image_file_path:
+            # Load the image
+            image = Image.open(image_file_path)
+
+            # Construct the output file name
+            output_file_name = f"{out_name.replace(".png","")}_{lookup_id}.png"
+            output_file_path = Path(output_folder) / output_file_name
+
+            # Save the image in the desired format
+            image.save(output_file_path, dpi=(300, 300))
+
+            print(f"Image saved to {output_file_path}")
+            matches += 1
         else:
-            print(f"Certificate not found in the image. {image_path}")
-            image = crop_center_vertical(image_path, output_dir)
-            # return  # TODO, crop center vertical and try
+            print(f"No matching image found for {first_name} {last_name}")
+    print(f"Total matches: {matches}")
 
-        # Detect faces in the entire image
-        # Load Haar Cascade classifier from the resource directory
-        haarcascades_path = resource_path(
-            "resources/haarcascades/haarcascade_frontalface_default.xml"
-        )
-        face_cascade = cv2.CascadeClassifier(haarcascades_path)
-
-        if face_cascade.empty():
-            raise FileNotFoundError(
-                "Haar Cascade XML file not found or failed to load."
-            )
-
-        faces = face_cascade.detectMultiScale(
-            image, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)
-        )
-
-        if len(faces) == 0:
-            print("No faces found in the image.")
-            return
-
-        # Find the face above the certificate
-        largest_face = None
-        largest_area = 0
-        for x, y, w, h in faces:
-            # if y < face_area[1]:  # Face must be above the certificate
-            area = w * h
-            if area > largest_area:
-                largest_area = area
-                largest_face = (x, y, w, h)
-
-        if largest_face is None:
-            print("No valid face found above the certificate.")
-            return
-
-        # Extract the largest face coordinates
-        x, y, w, h = largest_face
-
-        # Crop the image to the largest face
-        cropped_image = image[y : y + h, x : x + w]
-
-        # Convert the cropped image to PIL format
-        pil_image = Image.fromarray(cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB))
-
-        # Ensure the output directory exists
-        os.makedirs(output_dir, exist_ok=True)
-        names_string = "_".join([f"{name[0]}_{name[1]}" for name in names])
-        # Define the output path for the largest face image
-        output_path = os.path.join(
-            output_dir,
-            f"{os.path.basename(image_path)}_{names_string}.png",
-        )
-
-        # Save the cropped image with 300 DPI
-        pil_image.save(output_path, dpi=(300, 300))
-
-        print(f"Largest cropped face image saved to {output_path} with 300 DPI.")
-    except Exception as e:
-        print(f"An error occurred: {e}")
 
 
 def main():
 
-    if sys.argv[1] == "1":
-        # extract info from csv
-        csv_file_path = r"CCA PC members for photos.csv"
-        valid_data = read_and_validate_csv(csv_file_path)
-        # if valid_data is not None:
-        #     print(valid_data)
-        groups = classify_members(valid_data)
-        for group_name, members in groups.items():
-            print(f"\n{group_name.replace('_', ' ').title()}:")
-            for i, member in enumerate(members):
-                if i >= 5:
-                    break
-                print(
-                    f"Name: {member[0]} {member[1]}, {member[3]} ({member[4]})"
-                )  # TODO last name appears more than twice due to last names like smith
+    filename = 'PC Members Photos 20240916.csv'
+    # Call the function and print the results
+    extracted_names = extract_names(filename)
+    for name in extracted_names:
+        print(name)
+    # if sys.argv[1] == "1":
+    # extract info from csv
+    csv_file_path = r"CCA PC members for photos.csv"
+    valid_data = read_and_validate_csv(csv_file_path)
+    # if valid_data is not None:
+    #     print(valid_data)
+    if valid_data is not None:
+        # Filter out entries that match extracted names
+        filtered_data = valid_data[
+            ~valid_data.apply(lambda row: f"{row['First Name']} {row['Last Name']}" in extracted_names, axis=1)
+        ]
+        print(f"Filtered out {len(valid_data) - len(filtered_data)} entries.")
+    groups = classify_members(filtered_data)
+    for group_name, members in groups.items():
+        print(f"Number of {group_name.replace('_', ' ').title()}: {len(members)}")
+        print(f"\n{group_name.replace('_', ' ').title()}:")
+        for i, member in enumerate(members):
+            if i >= 3:
+                break
+            print(
+                f"Name: {member[0]} {member[1]}, {member[3]} ({member[4]})"  # First name, Last name, Title, Count
+            )  # TODO last name appears more than twice due to last names like smith
 
     # TODO: based on how many last names, find the corressponding image and crop the face, make a flow chart
-    elif sys.argv[1] == "2":
+    output_folder = Path.home() / "Downloads" / "cropped_faces"
+    if sys.argv[1] == "2":
         # Extract metadata from images in a folder
-        folder_path = "presidents_club_images/"  # Path to the folder with images
+        folder_path = "PC_Photos_v3/"  # Path to the folder with images
         metadata_list = process_images_in_folder(folder_path)
-        # Print or save the metadata list
-        for image_name, names in metadata_list:
+        # # Print or save the metadata list
+        
+
+        for image_name, names in tqdm(metadata_list, desc="Processing images"):
             if names:
-                print(f"Names in: {image_name}:{names}")
-                process_image(folder_path + image_name, names)
-    elif sys.argv[1] == "3":
+                print(f"Names in: {image_name}: {names}")
+                process_image(folder_path + image_name, names) # TODO check if the image is in the downloads folder already
+
+    elif sys.argv[1] == "3": # example
         # Image crop and find face examples
         images_dir = "images/"
         select_images(images_dir, [("John", "Doe"), ("Jane", "Doe")])
+
+    elif sys.argv[1] == "4":
+        match_and_save_images(valid_data, output_folder, (f"{output_folder}_id"))
+
 
 
 if __name__ == "__main__":

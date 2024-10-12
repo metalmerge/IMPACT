@@ -78,10 +78,15 @@ cropped_images_of_faces/
 # Jupyter Notebook
 .ipynb_checkpoints
 images/
+presidents_club_images-0/
+PC_Photos_v2/
+PC_Photos_v3/
 # IPython
 profile_default/
+names.txt
 ipython_config.py
-
+condense_into_one_folder.py
+PC Members Photos 20240916.csv
 # pyenv
 #   For a library or package, you might want to ignore these files since the code is
 #   intended to run in multiple environments; otherwise, check them in:
