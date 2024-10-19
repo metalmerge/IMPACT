@@ -202,7 +202,7 @@ def clean_title(title):
         str: Cleaned title text with only potential names left.
     """
     # Common words/phrases to remove
-    remove_phrases = [  # TODO import a library for this
+    remove_phrases = [
         "PC Certificate presented at",
         "San Antonio",
         "TX",
@@ -683,55 +683,116 @@ def process_image(input_image_path, names):
 
     d = gender.Detector()
     for name in names:
+        names_string = str(name).replace(" ", "_")
+        output_path = os.path.join(output_image_folder, f"{names_string}.png")
+        if os.path.exists(output_path):
+            print(f"Image already exists in {output_image_folder}")
+            continue
+        married = False
+        if len(names) > 1:
+            married = True
 
-        # first_name = name.split()[0]  # Assuming the first word is the first name
-        # guessed_gender = d.get_gender(first_name)
-        # print(f"Guessed: {first_name} to be {guessed_gender}")
+        first_name = name.split()[0]  # Assuming the first word is the first name
+        guessed_gender = d.get_gender(first_name)
+        print(f"Guessed: {first_name} to be {guessed_gender}")
         detect_and_crop_face_above_certificate(
             input_image_path,
             output_image_folder,
             certificate_template_path,
-            name,
-            # guessed_gender,
+            names_string,
+            guessed_gender,
+            married,
         )
 
 
-def crop_center_vertical(image_path, output_dir):
+def crop_image_based_on_conditions(
+    image_path, output_dir, guessed_gender="unknown", married=False
+):
     """
-    Crops the image into three vertical sections and keeps only the center section.
+    Crops the image based on the guessed gender and marital status:
+    - If male and married, divide into 5 vertical slices, crop out the center (3rd) slice, and crop out the bottom fourth of the image.
+    - If male and unmarried, crop out the bottom fourth of the image (horizontally).
+    - Otherwise, divide into 3 vertical slices and keep only the center section.
+
+    Parameters:
+        image_path (str): Path to the input image.
+        output_dir (str): Path to save the cropped image.
+        guessed_gender (str): The guessed gender of the person ("male" or "female").
+        married (bool): Marital status of the person (True for married, False for unmarried).
     """
     try:
         # Load the image using OpenCV
         image = cv2.imread(image_path)
-        _, width = image.shape[:2]
+        if image is None:
+            raise FileNotFoundError(f"Could not load image at {image_path}")
 
-        # Calculate the width of each section
-        section_width = width // 3
+        height, width = image.shape[:2]  # Get image dimensions
 
-        # Define the coordinates for the center section
-        start_x = section_width
-        end_x = 2 * section_width
+        # Scenario 1: Male and Married
+        if guessed_gender == "male" and married:
+            # Divide into 5 vertical slices
+            section_width = width // 5
 
-        # Crop the center section
-        center_section = image[:, start_x:end_x]
+            # Keep sides by cropping out the center 3rd slice
+            left_section = image[:, : section_width * 2]  # Left 2/5ths
+            right_section = image[:, section_width * 3 :]  # Right 2/5ths
 
-        return center_section
+            # Concatenate left and right sections horizontally
+            image_without_center = cv2.hconcat([left_section, right_section])
 
-        print(f"Cropped center section saved to {output_dir}")
+            # Now crop out the bottom fourth of the image (horizontally)
+            crop_bottom_y = int(height * 2 / 3)  # Keep upper 2/3rds of the image
+            cropped_image = image_without_center[:crop_bottom_y, :]
+
+        # Scenario 2: Male and Unmarried
+        # elif guessed_gender == "male" and not married:
+        #     # Crop out the bottom fourth of the image (horizontally)
+        #     crop_bottom_y = int(height * 3 / 4)  # Keep upper 3/4ths of the image
+        #     cropped_image = image[:crop_bottom_y, :]
+
+        elif guessed_gender == "female" and married:
+            # # Divide into 3 vertical slices
+            section_width = width // 3
+
+            # Keep only the center section
+            start_x = section_width
+            end_x = 2 * section_width
+            cropped_image = image[:, start_x:end_x]
+        # Scenario 3: Default (Other Cases)
+        else:
+            # Crop out the bottom fourth of the image (horizontally)
+            crop_bottom_y = int(height * 2 / 3)  # Keep upper 2/3rds of the image
+            cropped_image = image[:crop_bottom_y, :]
+
+        # Create output directory if it does not exist
+        # os.makedirs(output_dir, exist_ok=True)
+        # Create output file name and save cropped image
+        # output_file_name = os.path.join(
+        #     output_dir,
+        #     f"cropped__{guessed_gender}_{married}_{os.path.basename(image_path)}",
+        # )
+        # cv2.imwrite(output_file_name, cropped_image)
+        # print(f"Cropped image saved to {output_file_name}")
+
+        return cropped_image
+
     except Exception as e:
-        messagebox.showerror(
-            "Error", f"An error occurred while processing the image: {e}"
-        )
+        print(f"An error occurred: {e}")
+        return None
 
 
-def crop_image_above_certificate(image, certificate_area):
+def crop_image_above_certificate(image, certificate_area, guessed_gender, married):
     """
-    Crops the image to keep everything above the Y-coordinate where the certificate was found
-    and horizontally centered around the certificate's center X-coordinate.
+    Crops the image based on the guessed gender and marital status:
+    - If male and married, crop out the center (keep sides).
+    - If male and unmarried, crop everything below the certificate.
+    - Otherwise, crop the image above the certificate, centered around the certificate's X-coordinate.
 
     Parameters:
         image (numpy.ndarray): The input image.
         certificate_area (tuple): Coordinates of the detected certificate, given as ((top_left_x, top_left_y), (bottom_right_x, bottom_right_y)).
+        guessed_gender (str): The guessed gender of the person ("male" or "female").
+        married (bool): Marital status of the person (True for married, False for unmarried).
 
     Returns:
         numpy.ndarray: The cropped image.
@@ -748,15 +809,38 @@ def crop_image_above_certificate(image, certificate_area):
 
         # Define the width of the cropped area (you can adjust the width as needed)
         crop_width = (bottom_right_x - top_left_x) * 2
-        left_x = max(center_x - crop_width // 2, 0)
-        right_x = min(center_x + crop_width // 2, width)
 
-        # Define the cropping coordinates
-        crop_top = 0
-        crop_bottom = top_left_y
+        if guessed_gender == "male" and married:
+            # Crop out the center and keep sides
+            crop_top = 0
+            crop_bottom = top_left_y
+            left_x = 0  # Keep the left side
+            crop_width = bottom_right_x - top_left_x
+            right_x = center_x - crop_width // 2  # Crop center-left
+            cropped_image_left = image[crop_top:crop_bottom, left_x:right_x]
 
-        # Crop the image
-        cropped_image = image[crop_top:crop_bottom, left_x:right_x]
+            left_x = center_x + crop_width // 2  # Crop center-right
+            right_x = width  # Keep the right side
+            cropped_image_right = image[crop_top:crop_bottom, left_x:right_x]
+
+            # Combine the left and right cropped sides
+            cropped_image = cv2.hconcat([cropped_image_left, cropped_image_right])
+
+        elif guessed_gender == "male" and not married:
+            # Crop everything below the certificate
+            crop_top = 0
+            crop_bottom = top_left_y
+            cropped_image = image[crop_top:crop_bottom, :]
+
+        else:
+            # Default behavior: crop centered around certificate
+            left_x = max(center_x - crop_width // 2, 0)
+            right_x = min(center_x + crop_width // 2, width)
+            crop_top = 0
+            crop_bottom = top_left_y
+
+            # Crop the image
+            cropped_image = image[crop_top:crop_bottom, left_x:right_x]
 
         return cropped_image
 
@@ -765,42 +849,86 @@ def crop_image_above_certificate(image, certificate_area):
         return None
 
 
+def test_crop_image_above_certificate():
+    # Example images and certificate areas for testing
+    test_images = [
+        (
+            "male_married.jpg",
+            "male",
+            True,
+        ),  # Male, married (crop center out, keep sides)
+        (
+            "male_unmarried.jpg",
+            "male",
+            False,
+        ),  # Male, unmarried (crop below certificate)
+        ("female.jpg", "female", False),  # Female (default cropping behavior)
+    ]
+
+    # Fake certificate area for testing purposes (you can adjust based on the image resolution)
+    # Load the certificate template and input image
+    certificate_template_path = resource_path("certificate_template.jpg")
+    certificate_template = cv2.imread(certificate_template_path, cv2.IMREAD_GRAYSCALE)
+
+    for image_name, guessed_gender, married in test_images:
+
+        # Load the image (ensure these images exist in the same directory)
+        image = cv2.imread(image_name)
+        gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        if image is None:
+            print(f"Image {image_name} not found.")
+            continue
+        # Perform template matching to find the certificate in the image
+        result = cv2.matchTemplate(
+            gray_image, certificate_template, cv2.TM_CCOEFF_NORMED
+        )
+        _, max_val, _, max_loc = cv2.minMaxLoc(result)
+        # Set a threshold to detect the template
+        threshold = 0.7
+        if max_val >= threshold:
+            template_w, template_h = certificate_template.shape[::-1]
+            top_left = max_loc
+            bottom_right = (top_left[0] + template_w, top_left[1] + template_h)
+            certificate_area = (top_left, bottom_right)
+
+        output_dir = "output_tests"
+        os.makedirs(output_dir, exist_ok=True)
+        # Call the function
+        cropped_image = crop_image_above_certificate(
+            image, certificate_area, guessed_gender, married
+        )
+
+        if cropped_image is not None:
+            # Save the resulting cropped image
+            output_image_path = os.path.join(output_dir, f"cropped_{image_name}")
+            cv2.imwrite(output_image_path, cropped_image)
+            print(f"Saved cropped image for {image_name} at {output_image_path}")
+        else:
+            print(f"Failed to crop {image_name}")
+
+
 def detect_and_crop_face_above_certificate(
     image_path,
     output_dir,
     certificate_template_path,
-    name,
-    guessed_gender="unknown",  # TODO use guessed gender
+    names_string,
+    guessed_gender="unknown",
+    married=False,
 ):
     """
     Detects the certificate in the image, finds Larry Arnn's face, replaces it with black pixels,
     finds the face above it, crops the face (and upper body), and saves it with 300 DPI.
     """
-    names_string = str(name).replace(" ", "_")
     output_path = os.path.join(output_dir, f"{names_string}.png")
-    if os.path.exists(output_path):
-        print(f"Image already exists in {output_dir}")
-        return
     try:
         image_path = str(image_path)
 
-        # Load the certificate template and input image
-        certificate_template = cv2.imread(
-            certificate_template_path, cv2.IMREAD_GRAYSCALE
-        )
         image = cv2.imread(image_path)
-        if image is None:
-            error_message = f"Error: Unable to load image at {image_path}"
-            print(error_message)
-            with open("errors.txt", "a") as error_file:
-                error_file.write(f"{error_message}\n")
-            return
 
         gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
         # Load Larry Arnn's template for face detection
         larry_template = cv2.imread("Larry_Arnn_template.png", cv2.IMREAD_GRAYSCALE)
-
         # Find Larry Arnn's face using template matching
         larry_result = cv2.matchTemplate(
             gray_image, larry_template, cv2.TM_CCOEFF_NORMED
@@ -808,7 +936,9 @@ def detect_and_crop_face_above_certificate(
         _, larry_max_val, _, larry_max_loc = cv2.minMaxLoc(larry_result)
 
         # Set a threshold for Larry Arnn's face detection
-        print(f"Max value for Larry Arnn's face: {larry_max_val}")
+        print(
+            f"Max value for Larry Arnn's face: {larry_max_val}"
+        )  # TODO ineffective in finding Larry Arnn's face
         larry_threshold = 0.6
         if larry_max_val >= larry_threshold:
             larry_template_w, larry_template_h = larry_template.shape[::-1]
@@ -818,16 +948,29 @@ def detect_and_crop_face_above_certificate(
                 larry_top_left[1] + larry_template_h,
             )
 
-            cv2.rectangle(image, larry_top_left, larry_bottom_right, (0, 0, 0), -1)
+            image = cv2.rectangle(
+                image, larry_top_left, larry_bottom_right, (0, 0, 0), -1
+            )
+            gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             # Save image to see if Larry Arnn's face was detected
             # cv2.imwrite("test.png", image)
             print("Larry Arnn's face has been replaced with black pixels.")
+
+        # Load the certificate template and input image
+        certificate_template = cv2.imread(
+            certificate_template_path, cv2.IMREAD_GRAYSCALE
+        )
+        if image is None:
+            error_message = f"Error: Unable to load image at {image_path}"
+            print(error_message)
+            with open("errors.txt", "a") as error_file:
+                error_file.write(f"{error_message}\n")
+            return
         # Perform template matching to find the certificate in the image
         result = cv2.matchTemplate(
             gray_image, certificate_template, cv2.TM_CCOEFF_NORMED
         )
         _, max_val, _, max_loc = cv2.minMaxLoc(result)
-
         # Set a threshold to detect the template
         threshold = 0.7
         if max_val >= threshold:
@@ -835,12 +978,14 @@ def detect_and_crop_face_above_certificate(
             top_left = max_loc
             bottom_right = (top_left[0] + template_w, top_left[1] + template_h)
             certificate_area = (top_left, bottom_right)
-            image = crop_image_above_certificate(image, certificate_area)
-        else:
-            print(
-                f"Certificate not found in {image_path}, cropping left and right sections, keeping center."
+            image = crop_image_above_certificate(
+                image, certificate_area, guessed_gender, married
             )
-            image = crop_center_vertical(image_path, output_dir)
+        else:
+            print(f"Certificate not found in {image_path}")
+            image = crop_image_based_on_conditions(
+                image_path, output_dir, guessed_gender, married
+            )
         # Load Haar Cascade classifier for face detection
         haarcascades_path = resource_path(
             "resources/haarcascades/haarcascade_frontalface_default.xml"
@@ -855,7 +1000,6 @@ def detect_and_crop_face_above_certificate(
         faces = face_cascade.detectMultiScale(
             image, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)
         )
-        print(f"Faces detected: {len(faces)}")
         if len(faces) == 0:
             print("No faces found in the image.")
             return
@@ -1029,12 +1173,12 @@ def main():
         # Example: Image crop and find face examples
         images_dir = "images/"
         select_images(images_dir, [("John", "Doe"), ("Jane", "Doe")])
+        # test_crop_image_above_certificate()
+        # return
 
     elif sys.argv[1] == "4":
         # Match and save images to members
-        match_and_save_images(
-            valid_data, output_folder, str(output_folder) + "_id"
-        )  # TODO need to account for if just last name
+        match_and_save_images(valid_data, output_folder, str(output_folder) + "_id")
 
 
 if __name__ == "__main__":
