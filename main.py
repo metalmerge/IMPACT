@@ -382,6 +382,10 @@ def extract_names_from_filename(file_name):
         "PC Photo",
         "Copy",
         "Traditional",
+        "Family",
+        "family",
+        "present",
+        "Present",
         "With",
         "with",
         "Kids",
@@ -761,37 +765,6 @@ def crop_image_above_certificate(image, certificate_area):
         return None
 
 
-import concurrent.futures
-
-
-def detect_faces_with_timeout(face_cascade, image, timeout=20):
-    """
-    Detects faces in an image with a timeout.
-
-    Parameters:
-        face_cascade (cv2.CascadeClassifier): The Haar Cascade classifier.
-        image (numpy.ndarray): The image in which to detect faces.
-        timeout (int): The timeout in seconds.
-
-    Returns:
-        list: A list of detected faces.
-    """
-
-    def detect_faces():
-        return face_cascade.detectMultiScale(
-            image, scaleFactor=1.1, minNeighbors=3, minSize=(50, 50)
-        )
-
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        future = executor.submit(detect_faces)
-        try:
-            faces = future.result(timeout=timeout)
-            return faces
-        except concurrent.futures.TimeoutError:
-            print("Face detection process took longer than 20 seconds.")
-            return []
-
-
 def detect_and_crop_face_above_certificate(
     image_path,
     output_dir,
@@ -800,101 +773,123 @@ def detect_and_crop_face_above_certificate(
     guessed_gender="unknown",  # TODO use guessed gender
 ):
     """
-    Detects the certificate in the image, finds the face above it, crops the face (and upper body), and saves it with 300 DPI.
+    Detects the certificate in the image, finds Larry Arnn's face, replaces it with black pixels,
+    finds the face above it, crops the face (and upper body), and saves it with 300 DPI.
     """
-    image_path = str(image_path)
-
-    # Load the certificate template and input image
-    certificate_template = cv2.imread(certificate_template_path, cv2.IMREAD_GRAYSCALE)
-    image = cv2.imread(image_path)
-    if image is None:
-        error_message = f"Error: Unable to load image at {image_path}"
-        print(error_message)
-        with open("errors.txt", "a") as error_file:
-            error_file.write(f"{error_message}\n")
-        return
-
-    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    # Perform template matching to find the certificate in the image
-    result = cv2.matchTemplate(gray_image, certificate_template, cv2.TM_CCOEFF_NORMED)
-    _, max_val, _, max_loc = cv2.minMaxLoc(result)
-
-    # Check if any extension is in names and replace them
-    if any(ext in name for ext in EXTENSIONS):
-        for ext in EXTENSIONS:
-            names = names.replace(ext, "")
-        names_string = names
-    else:
-        names_string = str(name).replace(" ", "_")
-        # "_".join(str(name).replace(" ", "_") for name in names)
+    names_string = str(name).replace(" ", "_")
     output_path = os.path.join(output_dir, f"{names_string}.png")
+    if os.path.exists(output_path):
+        print(f"Image already exists in {output_dir}")
+        return
+    try:
+        image_path = str(image_path)
 
-    # Set a threshold to detect the template
-    threshold = 0.7
-    if max_val >= threshold:
-        template_w, template_h = certificate_template.shape[::-1]
-        top_left = max_loc
-        bottom_right = (top_left[0] + template_w, top_left[1] + template_h)
-        certificate_area = (top_left, bottom_right)
-        image = crop_image_above_certificate(
-            image, certificate_area
-        )  # TODO change when male
-    else:
-        if os.path.exists(output_path):
-            print(f"Image already exists in {output_dir}")
+        # Load the certificate template and input image
+        certificate_template = cv2.imread(
+            certificate_template_path, cv2.IMREAD_GRAYSCALE
+        )
+        image = cv2.imread(image_path)
+        if image is None:
+            error_message = f"Error: Unable to load image at {image_path}"
+            print(error_message)
+            with open("errors.txt", "a") as error_file:
+                error_file.write(f"{error_message}\n")
             return
-        print(f"Certificate not found in {image_path}")
-        image = crop_center_vertical(image_path, output_dir)
 
-    # Load Haar Cascade classifier for face detection
-    haarcascades_path = resource_path(
-        "resources/haarcascades/haarcascade_frontalface_default.xml"
-    )
-    face_cascade = cv2.CascadeClassifier(haarcascades_path)
-    if face_cascade.empty():
-        raise FileNotFoundError("Haar Cascade XML file not found or failed to load.")
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    # Detect faces
-    faces = face_cascade.detectMultiScale(
-        gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)
-    )
-    print(f"Faces detected: {len(faces)}")
-    if len(faces) == 0:
-        print("No faces found in the image.")
-        return
+        # Load Larry Arnn's template for face detection
+        larry_template = cv2.imread("Larry_Arnn_template.png", cv2.IMREAD_GRAYSCALE)
 
-    # Find the largest face
-    largest_face = max(faces, key=lambda rect: rect[2] * rect[3], default=None)
-    if largest_face is None:
-        print("No valid face found above the certificate.")
-        return
+        # Find Larry Arnn's face using template matching
+        larry_result = cv2.matchTemplate(
+            gray_image, larry_template, cv2.TM_CCOEFF_NORMED
+        )
+        _, larry_max_val, _, larry_max_loc = cv2.minMaxLoc(larry_result)
 
-    # Expand the bounding box to include the upper body
-    x, y, w, h = largest_face
-    expansion_factor = 2  # How much to expand the height
-    expanded_y = max(0, y - h // 2)  # Expand upwards by half the face height
-    expanded_h = min(
-        image.shape[0] - expanded_y, int(h * expansion_factor)
-    )  # Expand height by 2x the face height
+        # Set a threshold for Larry Arnn's face detection
+        print(f"Max value for Larry Arnn's face: {larry_max_val}")
+        larry_threshold = 0.6
+        if larry_max_val >= larry_threshold:
+            larry_template_w, larry_template_h = larry_template.shape[::-1]
+            larry_top_left = larry_max_loc
+            larry_bottom_right = (
+                larry_top_left[0] + larry_template_w,
+                larry_top_left[1] + larry_template_h,
+            )
 
-    expanded_x = max(0, x - w // 4)  # Expand width slightly to capture shoulders
-    expanded_w = min(
-        image.shape[1] - expanded_x, int(w * 1.5)
-    )  # Expand width by 1.5x the face width
+            cv2.rectangle(image, larry_top_left, larry_bottom_right, (0, 0, 0), -1)
+            # Save image to see if Larry Arnn's face was detected
+            # cv2.imwrite("test.png", image)
+            print("Larry Arnn's face has been replaced with black pixels.")
+        # Perform template matching to find the certificate in the image
+        result = cv2.matchTemplate(
+            gray_image, certificate_template, cv2.TM_CCOEFF_NORMED
+        )
+        _, max_val, _, max_loc = cv2.minMaxLoc(result)
 
-    # Crop the expanded region (upper body)
-    cropped_image = image[
-        expanded_y : expanded_y + expanded_h, expanded_x : expanded_x + expanded_w
-    ]
+        # Set a threshold to detect the template
+        threshold = 0.7
+        if max_val >= threshold:
+            template_w, template_h = certificate_template.shape[::-1]
+            top_left = max_loc
+            bottom_right = (top_left[0] + template_w, top_left[1] + template_h)
+            certificate_area = (top_left, bottom_right)
+            image = crop_image_above_certificate(image, certificate_area)
+        else:
+            print(
+                f"Certificate not found in {image_path}, cropping left and right sections, keeping center."
+            )
+            image = crop_center_vertical(image_path, output_dir)
+        # Load Haar Cascade classifier for face detection
+        haarcascades_path = resource_path(
+            "resources/haarcascades/haarcascade_frontalface_default.xml"
+        )
+        face_cascade = cv2.CascadeClassifier(haarcascades_path)
+        if face_cascade.empty():
+            raise FileNotFoundError(
+                "Haar Cascade XML file not found or failed to load."
+            )
 
-    # Convert to PIL format and save the image
-    pil_image = Image.fromarray(cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB))
-    os.makedirs(output_dir, exist_ok=True)
-    pil_image.save(output_path, dpi=(300, 300))
+        # Detect faces
+        faces = face_cascade.detectMultiScale(
+            image, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)
+        )
+        print(f"Faces detected: {len(faces)}")
+        if len(faces) == 0:
+            print("No faces found in the image.")
+            return
 
-    print(f"Upper body image saved to {output_path}\n")
+        # Find the largest detected face (not including Larry Arnn)
+        largest_face = max(faces, key=lambda rect: rect[2] * rect[3], default=None)
+        if largest_face is None:
+            print("No valid face found above the certificate.")
+            return
+
+        # Expand the bounding box to include the upper body
+        x, y, w, h = largest_face
+        expansion_factor = 2  # How much to expand the height
+        expanded_y = max(0, y - h // 2)  # Expand upwards by half the face height
+        expanded_h = min(
+            image.shape[0] - expanded_y, int(h * expansion_factor)
+        )  # Expand height by 2x the face height
+        expanded_x = max(0, x - w // 4)  # Expand width slightly to capture shoulders
+        expanded_w = min(
+            image.shape[1] - expanded_x, int(w * 1.5)
+        )  # Expand width by 1.5x the face width
+
+        # Crop the expanded region (upper body)
+        cropped_image = image[
+            expanded_y : expanded_y + expanded_h, expanded_x : expanded_x + expanded_w
+        ]
+
+        pil_image = Image.fromarray(cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB))
+        os.makedirs(output_dir, exist_ok=True)
+        pil_image.save(output_path, dpi=(300, 300))
+
+        print(f"Image saved to {output_path}\n")
+    except Exception as e:
+        print(f"An error occurred while saving the image: {e}")
 
 
 def match_and_save_images(csv_data, images_folder, output_folder):
@@ -1032,7 +1027,9 @@ def main():
 
     elif sys.argv[1] == "4":
         # Match and save images to members
-        match_and_save_images(valid_data, output_folder, str(output_folder) + "_id")
+        match_and_save_images(
+            valid_data, output_folder, str(output_folder) + "_id"
+        )  # TODO need to account for if just last name
 
 
 if __name__ == "__main__":
