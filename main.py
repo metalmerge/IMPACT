@@ -1049,23 +1049,28 @@ def match_and_save_images(csv_data, images_folder, output_folder):
     # Ensure the output directory exists
     os.makedirs(output_folder, exist_ok=True)
     matches = 0
-    # tqdm
-    for _, row in csv_data.iterrows():
+
+    # Initialize the gender detector
+    d = gender.Detector()
+
+    # Iterate over each row in the CSV data with a progress bar
+    for _, row in tqdm(
+        csv_data.iterrows(), total=csv_data.shape[0], desc="Processing images"
+    ):
         first_name = row["First Name"].strip()
         last_name = row["Last Name"].strip()
         lookup_id = row["LookupID"].strip()
 
         # Construct the image file name
         image_file_name = f"{first_name}_{last_name}"
-        d = gender.Detector()
         guessed_gender = d.get_gender(first_name)
-        print(f"Guessed: {first_name} to be {guessed_gender}")
+        print(f"\nGuessed: {first_name} to be {guessed_gender}")
         image_file_path = None
 
         # Search for the image file in the images folder
         for file in os.listdir(images_folder):
             if image_file_name in file or (
-                guessed_gender == "female" and first_name in file
+                guessed_gender == "female" and last_name in file
             ):
                 potential_path = Path(images_folder) / file
                 if potential_path.exists():
