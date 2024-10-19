@@ -17,6 +17,7 @@ import sys
 import csv
 from tqdm import tqdm
 import shutil
+import gender_guesser.detector as gender
 
 EXTENSIONS = [
     ".JPG",
@@ -679,20 +680,19 @@ def process_image(input_image_path, names):
     certificate_template_path = resource_path("certificate_template.jpg")
 
     # Pass the correct path to detect_and_crop_face_above_certificate
-    import gender_guesser.detector as gender
 
     d = gender.Detector()
     for name in names:
 
-        first_name = name.split()[0]  # Assuming the first word is the first name
-        guessed_gender = d.get_gender(first_name)
-        print(f"Guessed: {first_name} to be {guessed_gender}")
+        # first_name = name.split()[0]  # Assuming the first word is the first name
+        # guessed_gender = d.get_gender(first_name)
+        # print(f"Guessed: {first_name} to be {guessed_gender}")
         detect_and_crop_face_above_certificate(
             input_image_path,
             output_image_folder,
             certificate_template_path,
             name,
-            guessed_gender,
+            # guessed_gender,
         )
 
 
@@ -905,19 +905,24 @@ def match_and_save_images(csv_data, images_folder, output_folder):
     # Ensure the output directory exists
     os.makedirs(output_folder, exist_ok=True)
     matches = 0
-
-    for index, row in csv_data.iterrows():
+    # tqdm
+    for _, row in csv_data.iterrows():
         first_name = row["First Name"].strip()
         last_name = row["Last Name"].strip()
         lookup_id = row["LookupID"].strip()
 
         # Construct the image file name
         image_file_name = f"{first_name}_{last_name}"
+        d = gender.Detector()
+        guessed_gender = d.get_gender(first_name)
+        print(f"Guessed: {first_name} to be {guessed_gender}")
         image_file_path = None
 
         # Search for the image file in the images folder
         for file in os.listdir(images_folder):
-            if image_file_name in file:
+            if image_file_name in file or (
+                guessed_gender == "female" and first_name in file
+            ):
                 potential_path = Path(images_folder) / file
                 if potential_path.exists():
                     image_file_path = potential_path
