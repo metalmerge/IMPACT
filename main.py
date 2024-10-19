@@ -377,22 +377,46 @@ def extract_names_from_filename(file_name):
     Returns:
         list: A list of extracted names.
     """
+    banned_words = [
+        "edit",
+        "PC Photo",
+        "Copy",
+        "Traditional",
+        "With",
+        "with",
+        "Kids",
+        "kids",
+        "daughter",
+        "Daughter",
+    ]
     # Remove the file extension
+
     base_name = os.path.splitext(file_name)[0]
+    for phrase in banned_words:
+        base_name = re.sub(phrase, "", base_name, flags=re.IGNORECASE)
 
-    # Split the name(s) by "and" if present
-    names = base_name.split(" and ")
+    # Replace underscores and hyphens with spaces
+    base_name = base_name.replace("_", " ").replace("-", " ")
 
-    # Process each name, assuming the last name is the last word in the file name
+    # Split names by "and" or "&"
+    names = re.split(r" and | & ", base_name)
+
+    # Trim extra spaces
+    names = [name.strip() for name in names]
+
+    # Find the last name by checking if the last name appears in the final part
+    last_name = names[-1].split()[-1] if len(names) > 1 else None
+
+    # Append the last name to first names if needed
     full_names = []
-    if len(names) == 1:
-        # Single name
-        full_names.append(names[0].strip())
-    elif len(names) == 2:
-        # Two names, assume the last name is shared
-        last_name = names[1].split()[-1]  # Last name from the second name
-        full_names.append(f"{names[0].strip()} {last_name}")
-        full_names.append(f"{names[1].strip()}")
+    for name in names:
+        name_parts = name.split()
+        if (
+            len(name_parts) == 1 and last_name
+        ):  # If it's only a first name, add the last name
+            full_names.append(f"{name_parts[0]} {last_name}")
+        else:
+            full_names.append(name)
 
     return full_names
 
@@ -651,9 +675,21 @@ def process_image(input_image_path, names):
     certificate_template_path = resource_path("certificate_template.jpg")
 
     # Pass the correct path to detect_and_crop_face_above_certificate
-    detect_and_crop_face_above_certificate(
-        input_image_path, output_image_folder, certificate_template_path, names
-    )
+    import gender_guesser.detector as gender
+
+    d = gender.Detector()
+    for name in names:
+
+        first_name = name.split()[0]  # Assuming the first word is the first name
+        guessed_gender = d.get_gender(first_name)
+        print(f"Guessed: {first_name} to be {guessed_gender}")
+        detect_and_crop_face_above_certificate(
+            input_image_path,
+            output_image_folder,
+            certificate_template_path,
+            name,
+            guessed_gender,
+        )
 
 
 def crop_center_vertical(image_path, output_dir):
@@ -725,19 +761,55 @@ def crop_image_above_certificate(image, certificate_area):
         return None
 
 
+import concurrent.futures
+
+
+def detect_faces_with_timeout(face_cascade, image, timeout=20):
+    """
+    Detects faces in an image with a timeout.
+
+    Parameters:
+        face_cascade (cv2.CascadeClassifier): The Haar Cascade classifier.
+        image (numpy.ndarray): The image in which to detect faces.
+        timeout (int): The timeout in seconds.
+
+    Returns:
+        list: A list of detected faces.
+    """
+
+    def detect_faces():
+        return face_cascade.detectMultiScale(
+            image, scaleFactor=1.1, minNeighbors=3, minSize=(50, 50)
+        )
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future = executor.submit(detect_faces)
+        try:
+            faces = future.result(timeout=timeout)
+            return faces
+        except concurrent.futures.TimeoutError:
+            print("Face detection process took longer than 20 seconds.")
+            return []
+
+
 def detect_and_crop_face_above_certificate(
-    image_path, output_dir, certificate_template_path, names
+    image_path,
+    output_dir,
+    certificate_template_path,
+    name,
+    guessed_gender="unknown",  # TODO use guessed gender
 ):
     """
-    Detects the certificate in the image, finds the face above it, crops the face, and saves it with 300 DPI.
+    Detects the certificate in the image, finds the face above it, crops the face (and upper body), and saves it with 300 DPI.
     """
+    image_path = str(image_path)
+
     # Load the certificate template and input image
     certificate_template = cv2.imread(certificate_template_path, cv2.IMREAD_GRAYSCALE)
     image = cv2.imread(image_path)
     if image is None:
         error_message = f"Error: Unable to load image at {image_path}"
         print(error_message)
-        # Save the error message to a log file (errors.txt)
         with open("errors.txt", "a") as error_file:
             error_file.write(f"{error_message}\n")
         return
@@ -749,12 +821,13 @@ def detect_and_crop_face_above_certificate(
     _, max_val, _, max_loc = cv2.minMaxLoc(result)
 
     # Check if any extension is in names and replace them
-    if any(ext in names for ext in EXTENSIONS):
+    if any(ext in name for ext in EXTENSIONS):
         for ext in EXTENSIONS:
             names = names.replace(ext, "")
         names_string = names
     else:
-        names_string = "_".join(str(name).replace(" ", "_") for name in names)
+        names_string = str(name).replace(" ", "_")
+        # "_".join(str(name).replace(" ", "_") for name in names)
     output_path = os.path.join(output_dir, f"{names_string}.png")
 
     # Set a threshold to detect the template
@@ -764,11 +837,14 @@ def detect_and_crop_face_above_certificate(
         top_left = max_loc
         bottom_right = (top_left[0] + template_w, top_left[1] + template_h)
         certificate_area = (top_left, bottom_right)
-        image = crop_image_above_certificate(image, certificate_area)
+        image = crop_image_above_certificate(
+            image, certificate_area
+        )  # TODO change when male
     else:
         if os.path.exists(output_path):
             print(f"Image already exists in {output_dir}")
             return
+        print(f"Certificate not found in {image_path}")
         image = crop_center_vertical(image_path, output_dir)
 
     # Load Haar Cascade classifier for face detection
@@ -778,10 +854,13 @@ def detect_and_crop_face_above_certificate(
     face_cascade = cv2.CascadeClassifier(haarcascades_path)
     if face_cascade.empty():
         raise FileNotFoundError("Haar Cascade XML file not found or failed to load.")
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
+    # Detect faces
     faces = face_cascade.detectMultiScale(
-        image, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)
+        gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)
     )
+    print(f"Faces detected: {len(faces)}")
     if len(faces) == 0:
         print("No faces found in the image.")
         return
@@ -792,16 +871,30 @@ def detect_and_crop_face_above_certificate(
         print("No valid face found above the certificate.")
         return
 
+    # Expand the bounding box to include the upper body
     x, y, w, h = largest_face
-    cropped_image = image[y : y + h, x : x + w]
+    expansion_factor = 2  # How much to expand the height
+    expanded_y = max(0, y - h // 2)  # Expand upwards by half the face height
+    expanded_h = min(
+        image.shape[0] - expanded_y, int(h * expansion_factor)
+    )  # Expand height by 2x the face height
+
+    expanded_x = max(0, x - w // 4)  # Expand width slightly to capture shoulders
+    expanded_w = min(
+        image.shape[1] - expanded_x, int(w * 1.5)
+    )  # Expand width by 1.5x the face width
+
+    # Crop the expanded region (upper body)
+    cropped_image = image[
+        expanded_y : expanded_y + expanded_h, expanded_x : expanded_x + expanded_w
+    ]
 
     # Convert to PIL format and save the image
     pil_image = Image.fromarray(cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB))
     os.makedirs(output_dir, exist_ok=True)
-    print(output_path)
     pil_image.save(output_path, dpi=(300, 300))
 
-    print(f"Largest cropped face image saved to {output_path}\n")
+    print(f"Upper body image saved to {output_path}\n")
 
 
 def match_and_save_images(csv_data, images_folder, output_folder):
@@ -929,7 +1022,7 @@ def main():
         # Print or process each image metadata
         for image_name, names in tqdm(metadata_list, desc="Processing images"):
             if names:
-                print(f"Names in: {image_name}: {names}")
+                print(f"\nNames in: {image_name}: {names}")
                 process_image(Path(folder_path) / image_name, names)
 
     elif sys.argv[1] == "3":
