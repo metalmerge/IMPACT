@@ -1,1 +1,6 @@
+gender_guesser==0.4.0
 pywin32==306
+scikit_learn==1.5.2
+tensorflow==2.18.0
+tensorflow_intel==2.18.0
+tqdm==4.66.1
