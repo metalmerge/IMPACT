@@ -677,7 +677,9 @@ def process_image(input_image_path, names):
     # crop_center_vertical(input_image_path, output_image_folder)
 
     # Use the resource_path function to get the path for the template image
-    certificate_template_path = resource_path("certificate_template.jpg")
+    certificate_template_path = resource_path(
+        "image_templates/certificate_template.jpg"
+    )
 
     # Pass the correct path to detect_and_crop_face_above_certificate
 
@@ -867,7 +869,9 @@ def test_crop_image_above_certificate():
 
     # Fake certificate area for testing purposes (you can adjust based on the image resolution)
     # Load the certificate template and input image
-    certificate_template_path = resource_path("certificate_template.jpg")
+    certificate_template_path = resource_path(
+        "image_templates/certificate_template.jpg"
+    )
     certificate_template = cv2.imread(certificate_template_path, cv2.IMREAD_GRAYSCALE)
 
     for image_name, guessed_gender, married in test_images:
@@ -928,7 +932,9 @@ def detect_and_crop_face_above_certificate(
         gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
         # Load Larry Arnn's template for face detection
-        larry_template = cv2.imread("Larry_Arnn_template.png", cv2.IMREAD_GRAYSCALE)
+        larry_template = cv2.imread(
+            "image_templates/Larry_Arnn_template.png", cv2.IMREAD_GRAYSCALE
+        )
         # Find Larry Arnn's face using template matching
         larry_result = cv2.matchTemplate(
             gray_image, larry_template, cv2.TM_CCOEFF_NORMED

@@ -1,151 +1,147 @@
-# IMPACT: Image Matching and Processing for Cropped Transformation
+# IMPACT Project
 
-## Project Overview
-The **IMPACT** project (Image Matching and Processing for Cropped Transformation) is designed to automate the process of matching individuals' data from a CSV file with image metadata, cropping the matched images to show only the person’s face, and renaming the cropped image files using a unique lookup ID provided in the CSV. This tool will streamline image processing by making the workflow efficient and consistent, allowing users to work with clean, properly formatted images associated with the correct individuals.
+## Overview
 
-## Key Features
-- **CSV Data Processing**: Import and read data from a CSV file, which includes individuals’ names and a unique lookup ID.
-- **Image Metadata Matching**: Search through a folder of images and match each person by name using the metadata embedded in the images.
-- **Face Detection and Cropping**: Automatically detect the face of the matched person and crop the image to display only the face.
-- **Image Renaming and Export**: Save the cropped image with a new filename based on the unique lookup ID from the CSV file.
+The IMPACT project is designed to process images and CSV data to extract, validate, and classify member information. It includes functionalities for detecting and cropping faces in images, extracting metadata, and matching images to corresponding members based on their names.
 
----
+## Features
 
-## Table of Contents
-1. [Installation](#installation)
-2. [Usage](#usage)
-3. [Project Workflow](#project-workflow)
-4. [Tasks](#tasks)
-5. [Contributing](#contributing)
-6. [License](#license)
+- **CSV Data Validation**: Reads and validates CSV files to ensure required columns are present and data is clean.
+- **Face Detection and Cropping**: Detects faces in images, crops them, and saves the cropped images with 300 DPI.
+- **Metadata Extraction**: Extracts 'Title' metadata from Windows file properties.
+- **Name Extraction**: Extracts names from image titles and filenames.
+- **Member Classification**: Classifies members into various groups based on their titles, last names, and gender.
+- **Image Matching**: Matches images to members based on their names and saves the images with appropriate filenames.
 
----
+## Requirements
+
+- Python 3.x
+- Required Python packages:
+  - pandas
+  - numpy
+  - opencv-python
+  - Pillow
+  - tqdm
+  - gender-guesser
+  - pywin32 (for Windows metadata extraction)
 
 ## Installation
 
-1. **Clone the Repository**  
-   Run the following command to clone the project:
-   ```bash
-   git clone https://github.com/yourusername/IMPACT.git
-   cd IMPACT
+1. Clone the repository:
+   ```sh
+   git clone https://github.com/yourusername/impact.git
+   cd impact
    ```
 
-2. **Set Up the Environment**  
-   Create a virtual environment and install the required dependencies:
-   ```bash
-   python3 -m venv env
-   source env/bin/activate
+2. Install the required packages:
+   ```sh
    pip install -r requirements.txt
    ```
 
-3. **Dependencies**  
-   The project uses the following Python libraries:
-   - `pandas` (for handling CSV files)
-   - `opencv-python` (for image processing)
-   - `Pillow` (for image manipulation)
-   - `face_recognition` (for face detection and cropping)
-
-4. **Input Requirements**  
-   - A CSV file with individual data, including names and lookup IDs.
-   - A folder containing images with metadata fields including individual names.
-
----
-
 ## Usage
 
-To use the **IMPACT** tool, follow these steps:
+### Command-Line Arguments
 
-1. Ensure the CSV file and the folder of images are properly prepared.
-2. Run the script with the following command:
-   ```bash
-   python impact.py --csv_path "path/to/csvfile.csv" --image_folder "path/to/image_folder"
+The script can be run with different command-line arguments to perform various tasks:
+
+1. **Extract and Filter Member Data**:
+   ```sh
+   python main.py 1
    ```
 
-3. The script will output the cropped and renamed images in the `output` directory.
+2. **Extract Metadata from Images**:
+   ```sh
+   python main.py 2
+   ```
 
----
+3. **Image Crop and Face Detection**:
+   ```sh
+   python main.py 3
+   ```
 
-## Project Workflow
+4. **Match and Save Images to Members**:
+   ```sh
+   python main.py 4
+   ```
 
-### 1. CSV Data Import
-- Load the CSV file that contains each individual’s details, including:
-  - **Name** (to be matched with image metadata)
-  - **Unique Lookup ID** (used to rename the final processed image)
-  
-### 2. Image Metadata Matching
-- Read through the folder of images and extract metadata for each file.
-- Use the names in the metadata to match with the names in the CSV file.
-- If a match is found, proceed to the cropping step. If not, log the unmatched images for review.
+### Example
 
-### 3. Face Detection and Cropping
-- For each matched image, detect the person’s face using a face recognition library.
-- Automatically crop the image to only include the person's face while maintaining a reasonable margin.
-  
-### 4. Rename and Export
-- Rename the cropped image using the unique Lookup ID from the CSV file.
-- Save the new image in the `output` folder, maintaining the original image format (e.g., `.jpg`, `.png`).
+To process images in the `PC_Photos_v3/` folder and extract metadata:
+```sh
+python main.py 2
+```
 
----
+## Functions
 
-## Tasks
+### `read_and_validate_csv(csv_file_path)`
+Reads and validates a CSV file to ensure required columns are present and data is clean.
 
-Below is a comprehensive list of tasks for the **IMPACT** project:
+### `detect_and_crop_faces(image_path, output_dir)`
+Detects faces in an image, crops them, and saves the cropped images with 300 DPI.
 
-1. **Set Up Environment**  
-   - Install necessary libraries and set up the development environment.
-   - Ensure that dependencies are properly configured to handle CSV and image processing.
+### `extract_title_from_windows_properties(image_path)`
+Extracts the 'Title' metadata from Windows file properties.
 
-2. **CSV File Handling**  
-   - Read and parse the CSV file to extract relevant data (names and lookup IDs).
-   - Ensure data validation and handle cases of missing or malformed data.
+### `clean_title(title)`
+Removes unwanted words and phrases from the title.
 
-3. **Image Metadata Extraction**  
-   - Search through the image folder to extract metadata (name field from EXIF or similar).
-   - Match image metadata with the names from the CSV file.
-   - Handle any cases where no match is found by logging unmatched files.
+### `clean_title_around_larry_arnn(title)`
+Cleans the title by extracting up to 4 words before and after 'Larry Arnn'.
 
-4. **Face Detection**  
-   - Implement face detection using the `face_recognition` library.
-   - Handle multiple faces in one image by selecting the largest or first detected face.
+### `split_and_return_names(names)`
+Splits names containing '&' into separate names and returns a list of individual names.
 
-5. **Image Cropping**  
-   - Crop the image to display only the face, with some padding for clarity.
-   - Test cropping on various image sizes and formats to ensure accuracy.
+### `extract_names_from_title(title)`
+Extracts names from the title while excluding 'Larry Arnn'.
 
-6. **File Renaming and Export**  
-   - Rename each cropped image using the lookup ID from the CSV file.
-   - Save the newly cropped and renamed images in the `output` folder.
-   - Ensure image format and quality are preserved.
+### `extract_names_from_filename(file_name)`
+Extracts names from the file name.
 
-7. **Error Handling and Logging**  
-   - Implement logging for unmatched names and any errors encountered during processing.
-   - Provide a summary of errors or skipped items at the end of the run.
+### `process_images_in_folder(folder_path)`
+Processes images in a folder and extracts the 'Title' metadata.
 
-8. **Testing**  
-   - Test the entire process with sample data to ensure accuracy.
-   - Validate face cropping and file renaming functions work as expected.
-   
----
+### `load_data(csv_path)`
+Loads data from a CSV file.
 
-## Contributing
+### `determine_gender(title)`
+Determines gender based on the title.
 
-We welcome contributions to **IMPACT**! If you would like to contribute, please follow these steps:
+### `classify_members(data)`
+Classifies members into various groups based on their titles, last names, and gender.
 
-1. Fork the repository.
-2. Create a new branch for your feature or bug fix.
-3. Commit your changes.
-4. Push to the branch.
-5. Open a pull request and describe your changes.
+### `select_images(images_dir, names)`
+Selects images from a directory based on the provided names.
 
----
+### `process_images(file_paths, names)`
+Processes a list of image file paths.
+
+### `resource_path(relative_path)`
+Gets the absolute path to a resource.
+
+### `process_image(input_image_path, names)`
+Processes an image and performs cropping and face detection.
+
+### `crop_image_based_on_conditions(image_path, output_dir, guessed_gender, married)`
+Crops the image based on the guessed gender and marital status.
+
+### `crop_image_above_certificate(image, certificate_area, guessed_gender, married)`
+Crops the image above the certificate based on the guessed gender and marital status.
+
+### `test_crop_image_above_certificate()`
+Tests the `crop_image_above_certificate` function with example images.
+
+### `detect_and_crop_face_above_certificate(image_path, output_dir, certificate_template_path, names_string, guessed_gender, married)`
+Detects the certificate in the image, finds Larry Arnn's face, replaces it with black pixels, finds the face above it, crops the face, and saves it with 300 DPI.
+
+### `match_and_save_images(csv_data, images_folder, output_folder)`
+Matches each data entry in the CSV file with an image from the folder of images and saves the image in the format "first_name_last_name_lookup_id".
+
+### `extract_names(filename)`
+Extracts names from a CSV file.
+
+### `main()`
+Main function to process PC Members photos based on command-line arguments.
 
 ## License
 
-This project is licensed under the MIT License. See the `LICENSE` file for more details.
-
----
-
-## Contact
-
-For questions or issues, feel free to reach out via the GitHub repository's issue tracker.
-
+This project is licensed under the MIT License.
